@@ -13,3 +13,10 @@ log = "0.4.14"
 pollster = "0.2.4"
 image = "0.23.14"
 bytemuck = { version = "1.7.2", features = [ "derive" ] }
+
+# GUI
+egui = "0.15.0"
+egui_wgpu_backend = "0.14.0"
+egui_winit_platform = "0.11.0"
+
+egui_demo_lib = "0.15.0"

@@ -1,6 +1,18 @@
-use std::{iter, time::SystemTime};
+use std::{
+    iter,
+    time::{Instant, SystemTime},
+};
 
-use wgpu::util::DeviceExt;
+use egui::FontDefinitions;
+use egui_wgpu_backend::{
+    epi::{
+        backend::{AppOutput, FrameBuilder},
+        App, IntegrationInfo,
+    },
+    ScreenDescriptor,
+};
+use egui_winit_platform::{Platform, PlatformDescriptor};
+use wgpu::{util::DeviceExt, CommandEncoder, TextureView};
 use winit::{
     event::*,
     event_loop::{ControlFlow, EventLoop},
@@ -29,25 +41,128 @@ impl InfoUniform {
     }
 }
 
+enum MyEvent {
+    RequestRedraw,
+}
+
+struct ExampleRepaintSignal(std::sync::Mutex<winit::event_loop::EventLoopProxy<MyEvent>>);
+
+impl egui_wgpu_backend::epi::RepaintSignal for ExampleRepaintSignal {
+    fn request_repaint(&self) {
+        self.0
+            .lock()
+            .unwrap()
+            .send_event(MyEvent::RequestRedraw)
+            .ok();
+    }
+}
+
+struct MyUi {
+    platform: Platform,
+    render_pass: egui_wgpu_backend::RenderPass,
+    demo_app: egui_demo_lib::WrapApp,
+    repaint_signal: std::sync::Arc<ExampleRepaintSignal>,
+    previous_frame_time: Option<f32>,
+}
+
+impl MyUi {
+    fn new(
+        window: &Window,
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        event_loop: &EventLoop<MyEvent>,
+    ) -> Self {
+        let platform = Platform::new(PlatformDescriptor {
+            physical_width: window.inner_size().width as u32,
+            physical_height: window.inner_size().height as u32,
+            scale_factor: window.scale_factor(),
+            font_definitions: FontDefinitions::default(),
+            style: Default::default(),
+        });
+
+        let egui_rpass = egui_wgpu_backend::RenderPass::new(device, config.format, 1);
+        let demo_app = egui_demo_lib::WrapApp::default();
+
+        let repaint_signal = std::sync::Arc::new(ExampleRepaintSignal(std::sync::Mutex::new(
+            event_loop.create_proxy(),
+        )));
+
+        Self {
+            platform,
+            render_pass: egui_rpass,
+            demo_app,
+            repaint_signal,
+            previous_frame_time: None,
+        }
+    }
+
+    fn render(
+        &mut self,
+        window: &Window,
+        view: &TextureView,
+        encoder: &mut CommandEncoder,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        config: &wgpu::SurfaceConfiguration,
+    ) {
+        let egui_start = Instant::now();
+        self.platform.begin_frame();
+        let mut app_output = AppOutput::default();
+        let mut frame = FrameBuilder {
+            info: IntegrationInfo {
+                name: "A frame",
+                web_info: None,
+                cpu_usage: self.previous_frame_time,
+                native_pixels_per_point: Some(window.scale_factor() as _),
+                prefer_dark_mode: None,
+            },
+            tex_allocator: &mut self.render_pass,
+            output: &mut app_output,
+            repaint_signal: self.repaint_signal.clone(),
+        }
+        .build();
+
+        self.demo_app.update(&self.platform.context(), &mut frame);
+        let (_output, paint_commands) = self.platform.end_frame(Some(window));
+        let paint_jobs = self.platform.context().tessellate(paint_commands);
+        let frame_time = (Instant::now() - egui_start).as_secs_f64() as f32;
+        self.previous_frame_time = Some(frame_time);
+
+        let screen_descriptor = ScreenDescriptor {
+            physical_width: config.width,
+            physical_height: config.height,
+            scale_factor: window.scale_factor() as f32,
+        };
+        self.render_pass
+            .update_texture(device, queue, &self.platform.context().texture());
+        self.render_pass.update_user_textures(device, queue);
+        self.render_pass
+            .update_buffers(device, queue, &paint_jobs, &screen_descriptor);
+
+        self.render_pass
+            .execute(encoder, view, &paint_jobs, &screen_descriptor, None)
+            .unwrap();
+    }
+}
+
 struct State {
     surface: wgpu::Surface,
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    size: winit::dpi::PhysicalSize<u32>,
+    window_size: winit::dpi::PhysicalSize<u32>,
     render_pipeline: wgpu::RenderPipeline,
     info_uniform: InfoUniform,
     info_buffer: wgpu::Buffer,
     info_bind_group: wgpu::BindGroup,
     timer: SystemTime,
+    ui: MyUi,
 }
 
 impl State {
-    async fn new(window: &Window) -> Self {
+    async fn new(window: &Window, event_loop: &EventLoop<MyEvent>) -> Self {
         let size = window.inner_size();
 
-        // The instance is a handle to our GPU
-        // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(wgpu::Backends::VULKAN);
         let surface = unsafe { instance.create_surface(window) };
         let adapter = instance
@@ -82,7 +197,7 @@ impl State {
 
         let info_uniform = InfoUniform {
             window_size: size.into(),
-            mouse: [0,0],
+            mouse: [0, 0],
             time: 0.,
         };
         let info_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -150,11 +265,8 @@ impl State {
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
                 cull_mode: Some(wgpu::Face::Back),
-                // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
                 polygon_mode: wgpu::PolygonMode::Fill,
-                // Requires Features::DEPTH_CLAMPING
                 clamp_depth: false,
-                // Requires Features::CONSERVATIVE_RASTERIZATION
                 conservative: false,
             },
             depth_stencil: None,
@@ -167,23 +279,26 @@ impl State {
 
         let timer = std::time::SystemTime::now();
 
+        let ui = MyUi::new(window, &device, &config, event_loop);
+
         Self {
             surface,
             device,
             queue,
-            size,
+            window_size: size,
             config,
             render_pipeline,
             info_uniform,
             info_buffer,
             info_bind_group,
             timer,
+            ui,
         }
     }
 
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
-            self.size = new_size;
+            self.window_size = new_size;
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
@@ -203,6 +318,9 @@ impl State {
     }
 
     fn update(&mut self) {
+        self.ui
+            .platform
+            .update_time(self.timer.elapsed().unwrap().as_secs_f64());
         self.queue.write_buffer(
             &self.info_buffer,
             0,
@@ -210,7 +328,7 @@ impl State {
         );
     }
 
-    fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    fn render(&mut self, window: &Window) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
@@ -241,6 +359,17 @@ impl State {
             render_pass.draw(0..3, 0..1);
         }
 
+        {
+            self.ui.render(
+                window,
+                &view,
+                &mut encoder,
+                &self.device,
+                &self.queue,
+                &self.config,
+            );
+        }
+
         self.queue.submit(iter::once(encoder.finish()));
         output.present();
 
@@ -250,14 +379,16 @@ impl State {
 
 fn main() {
     env_logger::init();
-    let event_loop = EventLoop::new();
+    let event_loop: EventLoop<MyEvent> = winit::event_loop::EventLoop::with_user_event();
     let window = WindowBuilder::new()
-    .with_title("Shadey - ur shadertoy").build(&event_loop).unwrap();
+        .with_title("Shadey - ur shadertoy")
+        .build(&event_loop)
+        .unwrap();
 
-    // State::new uses async code, so we're going to wait for it to finish
-    let mut state = pollster::block_on(State::new(&window));
+    let mut state = pollster::block_on(State::new(&window, &event_loop));
 
     event_loop.run(move |event, _, control_flow| {
+        state.ui.platform.handle_event(&event);
         state.info_uniform.update_time(state.timer);
         match event {
             Event::WindowEvent {
@@ -280,7 +411,6 @@ fn main() {
                             state.resize(*physical_size);
                         }
                         WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                            // new_inner_size is &mut so w have to dereference it twice
                             state.resize(**new_inner_size);
                         }
                         _ => {}
@@ -289,19 +419,14 @@ fn main() {
             }
             Event::RedrawRequested(_) => {
                 state.update();
-                match state.render() {
+                match state.render(&window) {
                     Ok(_) => {}
-                    // Reconfigure the surface if lost
-                    Err(wgpu::SurfaceError::Lost) => state.resize(state.size),
-                    // The system is out of memory, we should probably quit
+                    Err(wgpu::SurfaceError::Lost) => state.resize(state.window_size),
                     Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
-                    // All other errors (Outdated, Timeout) should be resolved by the next frame
                     Err(e) => eprintln!("{:?}", e),
                 }
             }
             Event::MainEventsCleared => {
-                // RedrawRequested will only trigger once, unless we manually
-                // request it.
                 window.request_redraw();
             }
             _ => {}
