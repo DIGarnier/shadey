@@ -1,4 +1,4 @@
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PType {
     Bool,
     I32,
@@ -48,7 +48,7 @@ impl Aligned for PType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TType {
     Scalar(PType),
     Vector(usize, PType),
@@ -95,7 +95,7 @@ fn offset_of_member(struc: &Vec<StructSlot>, slot: usize) -> usize {
     round_up(k, n)
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct StructSlot {
     pub identifier: String,
     pub typed: TType,
@@ -139,6 +139,10 @@ impl DynamicStruct {
 
     pub fn buffer(&self) -> &[u8] {
         &self.buffer[..]
+    }
+
+    pub fn buffer_mut(&mut self) -> &mut [u8] {
+        &mut self.buffer[..]
     }
 }
 

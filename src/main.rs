@@ -16,7 +16,7 @@ pub(crate) mod wgsl;
 use autogen_ui::{EguiState, MyEvent};
 use futures::{executor::ThreadPool, Future};
 use notify::{DebouncedEvent, ReadDirectoryChangesWatcher, RecursiveMode, Watcher};
-use std::time::{Duration, Instant};
+use std::{time::{Duration, Instant}, path::{Path, PathBuf}};
 use wgpu::util::DeviceExt;
 use wgsl::{DynamicStruct, Sized};
 use winit::{
@@ -28,7 +28,7 @@ use winit::{
 struct ShaderFileContent(String);
 
 impl ShaderFileContent {
-    fn new(shader_path: &str) -> Option<Self> {
+    fn new(shader_path: &Path) -> Option<Self> {
         let std_content =
             std::fs::read_to_string("src/std.wgsl").expect("Shader std lib couldn't be found");
         let shader_content = std::fs::read_to_string(shader_path).ok()?;
@@ -207,7 +207,7 @@ fn create_bind_group(
 }
 
 fn create_file_watcher(
-    shader_path: String,
+    shader_path: &Path,
     event_loop_proxy: &EventLoopProxy<MyEvent>,
 ) -> (impl Future<Output = ()>, ReadDirectoryChangesWatcher) {
     let watcher_event_loop_proxy = event_loop_proxy.clone();
@@ -215,15 +215,15 @@ fn create_file_watcher(
     let mut watcher = notify::watcher(send, Duration::from_millis(100u64)).unwrap();
 
     watcher
-        .watch(shader_path.clone(), RecursiveMode::NonRecursive)
+        .watch(shader_path, RecursiveMode::NonRecursive)
         .unwrap();
 
     (
         async move {
             loop {
                 match recv.recv() {
-                    Ok(DebouncedEvent::Write(_)) => watcher_event_loop_proxy
-                        .send_event(MyEvent::ReloadShader(shader_path.clone()))
+                    Ok(DebouncedEvent::Write(p)) => watcher_event_loop_proxy
+                        .send_event(MyEvent::ReloadShader(p))
                         .unwrap(),
                     Ok(DebouncedEvent::Remove(_)) | Ok(DebouncedEvent::Create(_)) => return,
                     Err(e) => println!("watch error: {:?}", e),
@@ -247,7 +247,7 @@ struct VulkanState {
     start: Instant,
     ui: EguiState,
     file_watcher: ReadDirectoryChangesWatcher,
-    old_shader_path: String,
+    old_shader_path: PathBuf,
 }
 
 impl VulkanState {
@@ -289,9 +289,11 @@ impl VulkanState {
         };
         surface.configure(&device, &config);
 
-        let default_shader_path = "src/default.wgsl";
+        let default_shader_path = std::path::PathBuf::from("src/default.wgsl");
+
+        dbg!(&default_shader_path);
         let default_shader_content =
-            ShaderFileContent::new(default_shader_path).expect("Default shader should be present");
+            ShaderFileContent::new(&default_shader_path).expect("Default shader should be present");
 
         let std_uniform = Uniform::new(&device, &default_shader_content, "StdUniform");
         let gui_uniform = Uniform::new(&device, &default_shader_content, "GuiControlled");
@@ -319,7 +321,7 @@ impl VulkanState {
         );
 
         let (fw_future, file_watcher) =
-            create_file_watcher(default_shader_path.to_owned(), event_loop_proxy);
+            create_file_watcher(&default_shader_path, event_loop_proxy);
 
         thread_pool.spawn_ok(fw_future);
         Self {
@@ -334,7 +336,7 @@ impl VulkanState {
             start: Instant::now(),
             ui,
             file_watcher,
-            old_shader_path: default_shader_path.to_owned(),
+            old_shader_path: default_shader_path,
         }
     }
 
@@ -446,8 +448,7 @@ impl VulkanState {
                     let new_shader_path = new_shader_file
                         .unwrap()
                         .path()
-                        .to_string_lossy()
-                        .into_owned();
+                        .to_owned();
 
                     event_loop_proxy_clone
                         .send_event(MyEvent::ReloadShader(new_shader_path))
@@ -471,8 +472,10 @@ impl VulkanState {
                     eprintln!("{}", e);
                     return;
                 }
-
-                self.ui.gui_uniform = Uniform::new(&self.device, &shader_content, "GuiControlled");
+                let candidate_uniform = Uniform::new(&self.device, &shader_content, "GuiControlled");
+                if candidate_uniform.dynamic_struct.slots != self.ui.gui_uniform.dynamic_struct.slots {
+                    self.ui.gui_uniform = candidate_uniform;
+                }
                 self.bind_group_layout =
                     create_bind_group_layout(&self.device, &self.std_uniform, &self.ui.gui_uniform);
                 self.bind_group = create_bind_group(
@@ -493,8 +496,10 @@ impl VulkanState {
                         .unwatch(&self.old_shader_path)
                         .expect("Old shader path should be exist (was already used)");
                     self.file_watcher
-                        .watch(new_shader_path, RecursiveMode::NonRecursive)
+                        .watch(&new_shader_path, RecursiveMode::NonRecursive)
                         .expect("Shader path should exist (was already validated)");
+
+                    self.old_shader_path = new_shader_path;
                 }
             }
         }
