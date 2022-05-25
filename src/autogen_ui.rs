@@ -1,4 +1,4 @@
-use std::{mem::MaybeUninit, time::Instant};
+use std::{mem::MaybeUninit, path::PathBuf, time::Instant};
 
 use egui_wgpu_backend::{epi::App, ScreenDescriptor};
 use egui_winit_platform::{Platform, PlatformDescriptor};
@@ -10,15 +10,19 @@ use crate::wgsl::{DynamicStruct, PType, TType};
 fn ui_f32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
     let data = gui_struct.read_from_slot_ref_mut::<f32>(slot);
-    ui.add(
-        egui::widgets::Slider::new(data, 0.0..=1.0).text(identifier),
-    );
+    ui.horizontal(|ui| {
+        ui.add(egui::widgets::Slider::new(data, 0.0..=1.0));
+        ui.label(identifier);
+    });
 }
 
 fn ui_u32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
     let data = gui_struct.read_from_slot_ref_mut::<u32>(slot);
-    ui.add(egui::widgets::Slider::new(data, 0..=100).text(identifier));
+    ui.horizontal(|ui| {
+        ui.add(egui::widgets::Slider::new(data, 0..=100));
+        ui.label(identifier);
+    });
 }
 
 fn ui_vec3f32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
@@ -97,7 +101,7 @@ pub fn generate_auto_ui(ctx: &egui::CtxRef, gui_struct: &mut DynamicStruct) {
 #[derive(Debug)]
 pub enum MyEvent {
     OpenFileDialog,
-    ReloadShader(String),
+    ReloadShader(PathBuf),
 }
 
 pub struct EguiState {
@@ -106,6 +110,7 @@ pub struct EguiState {
     previous_frame_time: Option<f32>,
     event_loop_proxy: EventLoopProxy<MyEvent>,
     pub gui_uniform: crate::Uniform,
+    draw_right_panel: bool,
 }
 
 impl egui_wgpu_backend::epi::App for EguiState {
@@ -127,10 +132,14 @@ impl egui_wgpu_backend::epi::App for EguiState {
                             .unwrap();
                     }
                 });
+                ui.add_space(ui.available_width() - 90.0 );
+                ui.checkbox(&mut self.draw_right_panel, " Draw Panel?");
             });
+            
         });
-
-        generate_auto_ui(ctx, &mut self.gui_uniform.dynamic_struct);
+        if self.draw_right_panel {
+            generate_auto_ui(ctx, &mut self.gui_uniform.dynamic_struct);
+        }
     }
 
     fn clear_color(&self) -> egui::Rgba {
@@ -165,6 +174,7 @@ impl EguiState {
             previous_frame_time: None,
             event_loop_proxy: event_loop_proxy.clone(),
             gui_uniform,
+            draw_right_panel: true,
         }
     }
 
