@@ -119,10 +119,10 @@ impl egui_wgpu_backend::epi::App for EguiState {
     }
 
     fn update(&mut self, ctx: &egui::CtxRef, _frame: &mut egui_wgpu_backend::epi::Frame<'_>) {
+        
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             use egui::*;
-            trace!(ui);
-
+            
             menu::bar(ui, |ui| {
                 menu::menu(ui, "Shader", |ui| {
                     if ui.button("Open...").clicked() {

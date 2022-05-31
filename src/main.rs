@@ -6,70 +6,39 @@
 // 4. Autocreate UI to modify uniform DONE! (ish)
 // 5. Watch shader file for change and autoreload DONE !
 // 6. Parse comment options
+//      6.1. Add texture loading
+//      6.2. ...
 // 7. Build up widget libraries
 // 8. Gracefully handle bad app states
 
 pub(crate) mod autogen_ui;
 pub(crate) mod parser;
+pub(crate) mod shader;
 pub(crate) mod wgsl;
 
 use autogen_ui::{EguiState, MyEvent};
 use futures::{executor::ThreadPool, Future};
 use notify::{DebouncedEvent, ReadDirectoryChangesWatcher, RecursiveMode, Watcher};
-use std::{time::{Duration, Instant}, path::{Path, PathBuf}};
-use wgpu::util::DeviceExt;
-use wgsl::{DynamicStruct, Sized};
+use shader::{ShaderFileBuf, Uniform, GUICONTROLLED_DEF};
+use std::{
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
+use wgsl::Sized;
 use winit::{
-    event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent},
+    event::{ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop, EventLoopProxy},
     window::{Window, WindowBuilder},
 };
 
-struct ShaderFileContent(String);
-
-impl ShaderFileContent {
-    fn new(shader_path: &Path) -> Option<Self> {
-        let std_content =
-            std::fs::read_to_string("src/std.wgsl").expect("Shader std lib couldn't be found");
-        let shader_content = std::fs::read_to_string(shader_path).ok()?;
-
-        Self(std_content + &shader_content[..]).into()
-    }
-}
-
-pub struct Uniform {
-    dynamic_struct: DynamicStruct,
-    gpu_buffer_handle: wgpu::Buffer,
-}
-
-impl Uniform {
-    fn new(
-        device: &wgpu::Device,
-        shader_content: &ShaderFileContent,
-        uniform_typename: &str,
-    ) -> Self {
-        let (_, dynamic_struct_slots) =
-            parser::parse_struct_named(&shader_content.0, uniform_typename).expect(&format!(
-                "Problem with typename {} in shader",
-                uniform_typename
-            ));
-        let dynamic_struct = DynamicStruct::new(dynamic_struct_slots);
-        let gpu_buffer_handle = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(&format!("{} Buffer", uniform_typename)),
-            contents: dynamic_struct.buffer(),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        Self {
-            dynamic_struct,
-            gpu_buffer_handle,
-        }
-    }
-}
+use crate::{
+    parser::adjustment_for_safe_insert,
+    shader::{ShaderFileBuilder, UniformChoice}, wgsl::PType,
+};
 
 fn create_shader_module(
     device: &wgpu::Device,
-    shader_content: &ShaderFileContent,
+    shader_content: &ShaderFileBuf,
 ) -> Result<wgpu::ShaderModule, &'static str> {
     static mut VALID: bool = true;
     static mut ERROR: String = String::new();
@@ -87,7 +56,7 @@ fn create_shader_module(
     });
     let shader_module = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
         label: None,
-        source: wgpu::ShaderSource::Wgsl(shader_content.0.clone().into()),
+        source: wgpu::ShaderSource::Wgsl(shader_content.content.clone().into()),
     });
 
     if unsafe { VALID } {
@@ -289,14 +258,22 @@ impl VulkanState {
         };
         surface.configure(&device, &config);
 
-        let default_shader_path = std::path::PathBuf::from("src/default.wgsl");
+        let default_shader_path = std::path::PathBuf::from("shader/default.wgsl");
 
-        dbg!(&default_shader_path);
-        let default_shader_content =
-            ShaderFileContent::new(&default_shader_path).expect("Default shader should be present");
+        let mut default_shader_builder =
+            ShaderFileBuilder::new(&default_shader_path).expect("Default shader should be present");
 
-        let std_uniform = Uniform::new(&device, &default_shader_content, "StdUniform");
-        let gui_uniform = Uniform::new(&device, &default_shader_content, "GuiControlled");
+        let std_uniform = default_shader_builder.uniform(&device, UniformChoice::StandardLib);
+        let gui_uniform = default_shader_builder.uniform(&device, UniformChoice::GuiControlled);
+
+        default_shader_builder.inject_content(GUICONTROLLED_DEF);
+
+        for elem in &gui_uniform.dynamic_struct.slots {
+            default_shader_builder.inject_content(&elem.generate_definition());
+        }
+
+        let default_shader_content = default_shader_builder.build();
+
 
         let bind_group_layout = create_bind_group_layout(&device, &std_uniform, &gui_uniform);
         let bind_group = create_bind_group(
@@ -320,8 +297,7 @@ impl VulkanState {
             gui_uniform,
         );
 
-        let (fw_future, file_watcher) =
-            create_file_watcher(&default_shader_path, event_loop_proxy);
+        let (fw_future, file_watcher) = create_file_watcher(&default_shader_path, event_loop_proxy);
 
         thread_pool.spawn_ok(fw_future);
         Self {
@@ -357,6 +333,21 @@ impl VulkanState {
                 self.std_uniform
                     .dynamic_struct
                     .write_to_slot::<[u32; 2]>(2, &(*position).into()); // slot 2 is mouse_pos
+                true
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } => {
+                let mouse_pos = self
+                    .std_uniform
+                    .dynamic_struct
+                    .read_from_slot_ref_mut::<[u32; 2]>(2)
+                    .to_owned();
+                self.std_uniform
+                    .dynamic_struct
+                    .write_to_slot::<[u32; 2]>(4, &mouse_pos);
                 true
             }
             _ => false,
@@ -445,10 +436,7 @@ impl VulkanState {
                 let event_loop_proxy_clone = event_loop_proxy.clone();
                 thread_pool.spawn_ok(async move {
                     let new_shader_file = dialog.await;
-                    let new_shader_path = new_shader_file
-                        .unwrap()
-                        .path()
-                        .to_owned();
+                    let new_shader_path = new_shader_file.unwrap().path().to_owned();
 
                     event_loop_proxy_clone
                         .send_event(MyEvent::ReloadShader(new_shader_path))
@@ -457,14 +445,25 @@ impl VulkanState {
                 });
             }
             MyEvent::ReloadShader(new_shader_path) => {
-                let maybe_shader_content = ShaderFileContent::new(&new_shader_path);
+                let maybe_shader_content = ShaderFileBuilder::new(&new_shader_path);
 
                 if let None = maybe_shader_content {
                     eprintln!("Shader wasn't found");
                     return;
                 }
 
-                let shader_content = maybe_shader_content.unwrap();
+                let mut shader_builder = maybe_shader_content.unwrap();
+
+                let candidate_uniform =
+                    shader_builder.uniform(&self.device, UniformChoice::GuiControlled);
+
+                shader_builder.inject_content(GUICONTROLLED_DEF);
+
+                for elem in &candidate_uniform.dynamic_struct.slots {
+                    shader_builder.inject_content(&elem.generate_definition());
+                }
+
+                let shader_content = shader_builder.build();
 
                 let maybe_shader_module = create_shader_module(&self.device, &shader_content);
 
@@ -472,8 +471,10 @@ impl VulkanState {
                     eprintln!("{}", e);
                     return;
                 }
-                let candidate_uniform = Uniform::new(&self.device, &shader_content, "GuiControlled");
-                if candidate_uniform.dynamic_struct.slots != self.ui.gui_uniform.dynamic_struct.slots {
+
+                if candidate_uniform.dynamic_struct.slots
+                    != self.ui.gui_uniform.dynamic_struct.slots
+                {
                     self.ui.gui_uniform = candidate_uniform;
                 }
                 self.bind_group_layout =
@@ -531,6 +532,12 @@ impl VulkanState {
 }
 
 fn main() {
+    // let fc = std::fs::read_to_string("shader/default.wgsl").unwrap();
+    // let res = parser::parse_options(&fc);
+
+
+    // std::process::exit(1);
+
     env_logger::init();
     let event_loop: EventLoop<MyEvent> = winit::event_loop::EventLoop::with_user_event();
     let thread_pool = futures::executor::ThreadPool::new().unwrap();

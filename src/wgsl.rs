@@ -10,6 +10,22 @@ pub enum PType {
     F64,
 }
 
+impl From<&PType> for String {
+    fn from(ptype: &PType) -> Self {
+        match ptype {
+            PType::Bool => "bool",
+            PType::I32 => "i32",
+            PType::I64 => "i64",
+            PType::U32 => "u32",
+            PType::U64 => "u64",
+            PType::F16 => "f16",
+            PType::F32 => "f32",
+            PType::F64 => "f64",
+        }.to_owned()
+    }
+}
+
+
 pub trait Sized {
     fn size(&self) -> usize;
 }
@@ -22,13 +38,9 @@ impl Sized for PType {
     fn size(&self) -> usize {
         match self {
             PType::Bool => 1,
-            PType::I32 => 4,
-            PType::I64 => 8,
-            PType::U32 => 4,
-            PType::U64 => 8,
             PType::F16 => 2,
-            PType::F32 => 4,
-            PType::F64 => 8,
+            PType::I32 | PType::U32 | PType::F32 => 4,
+            PType::I64 | PType::U64 | PType::F64 => 8,
         }
     }
 }
@@ -37,9 +49,7 @@ impl Aligned for PType {
     fn align(&self) -> usize {
         match self {
             PType::F16 => 2,
-            PType::I32 => 4,
-            PType::U32 => 4,
-            PType::F32 => 4,
+            PType::I32 | PType::U32 | PType::F32 => 4,
             PType::Bool => unreachable!(),
             PType::I64 => unreachable!(),
             PType::U64 => unreachable!(),
@@ -54,6 +64,17 @@ pub enum TType {
     Vector(usize, PType),
     Matrix { m: usize, n: usize, typed: PType },
     Array(usize, Box<TType>),
+}
+
+impl From<&TType> for String {
+    fn from(ttype: &TType) -> Self {
+        match ttype {
+            TType::Scalar(x) => x.into(),
+            TType::Vector(n, x) => format!("vec{}<{}>", n, String::from(x)),
+            TType::Matrix { m, n, typed } => format!("mat{}x{}<{}>", m, n, String::from(typed)),
+            TType::Array(n, x) => format!("array<{},{}>", String::from(&**x), n),
+        }
+    }
 }
 
 impl Sized for TType {
@@ -100,6 +121,17 @@ pub struct StructSlot {
     pub identifier: String,
     pub typed: TType,
     pub comment: String,
+}
+
+impl StructSlot {
+    pub fn generate_definition(&self) -> String {
+        format!(
+            "fn {ident}() -> {typed} {{return _gui.{ident};}}"
+            ,
+            ident=self.identifier,
+            typed=String::from(&self.typed)
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -159,8 +191,8 @@ impl Aligned for Vec<StructSlot> {
     }
 }
 
-mod test {
-    use crate::wgsl::{Aligned, PType, Sized, TType};
+mod tests {
+    use super::*;
 
     fn catch_unwind_silent<F: FnOnce() -> R + std::panic::UnwindSafe, R>(
         f: F,
