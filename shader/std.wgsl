@@ -57,3 +57,7 @@ fn hex_to_rgba(a: u32) -> vec4<f32> {
         extractBits(a, 8u, 8u), 
         extractBits(a, 0u, 8u))) / 255.0;
 }
+
+fn flipy(k: vec2<f32>) -> vec2<f32> {
+    return vec2<f32>(k.x, 1.0 - k.y);
+}

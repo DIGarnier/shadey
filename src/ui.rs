@@ -3,9 +3,9 @@ use std::{mem::MaybeUninit, path::PathBuf, time::Instant};
 use egui_wgpu_backend::{epi::App, ScreenDescriptor};
 use egui_winit_platform::{Platform, PlatformDescriptor};
 use wgpu::{CommandEncoder, TextureView};
-use winit::{dpi::PhysicalSize, event_loop::EventLoopProxy, window::Window};
+use winit::{dpi::PhysicalSize, event_loop::{EventLoopProxy, EventLoop}, window::Window};
 
-use crate::wgsl::{DynamicStruct, PType, TType};
+use crate::{wgsl::{DynamicStruct, PType, TType}, shader::Uniform};
 
 fn ui_f32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
@@ -27,7 +27,6 @@ fn ui_u32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
 
 fn ui_vec3f32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
-
     let data = gui_struct.read_from_slot_ref_mut::<[f32; 3]>(slot);
     ui.horizontal(|ui| {
         ui.color_edit_button_rgb(data);
@@ -37,7 +36,6 @@ fn ui_vec3f32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
 
 fn ui_vec4f32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
-
     let data = gui_struct.read_from_slot_ref_mut::<[f32; 4]>(slot);
     ui.horizontal(|ui| {
         ui.color_edit_button_rgba_unmultiplied(data);
@@ -47,11 +45,9 @@ fn ui_vec4f32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
 
 fn ui_vec3u32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
-
     let mut data = gui_struct
         .read_from_slot_ref_mut::<[u32; 3]>(slot)
         .map(|x| x as f32 / 255.0);
-
     ui.horizontal(|ui| {
         ui.color_edit_button_rgb(&mut data);
         ui.label(identifier);
@@ -62,7 +58,6 @@ fn ui_vec3u32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
 
 fn ui_vec4u32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
-
     let mut data = gui_struct
         .read_from_slot_ref_mut::<[u32; 4]>(slot)
         .map(|x| x as f32 / 255.0);
@@ -99,21 +94,21 @@ pub fn generate_auto_ui(ctx: &egui::CtxRef, gui_struct: &mut DynamicStruct) {
 }
 
 #[derive(Debug)]
-pub enum MyEvent {
+pub enum ShadeyEvent {
     OpenFileDialog,
     ReloadShader(PathBuf),
 }
 
-pub struct EguiState {
+pub struct Egui {
     pub platform: egui_winit_platform::Platform,
     render_pass: egui_wgpu_backend::RenderPass,
     previous_frame_time: Option<f32>,
-    event_loop_proxy: EventLoopProxy<MyEvent>,
-    pub gui_uniform: crate::Uniform,
+    event_loop_proxy: EventLoopProxy<ShadeyEvent>,
+    pub gui_uniform: Uniform,
     draw_right_panel: bool,
 }
 
-impl egui_wgpu_backend::epi::App for EguiState {
+impl egui_wgpu_backend::epi::App for Egui {
     fn name(&self) -> &str {
         "Shadey"
     }
@@ -127,7 +122,7 @@ impl egui_wgpu_backend::epi::App for EguiState {
                 menu::menu(ui, "Shader", |ui| {
                     if ui.button("Open...").clicked() {
                         self.event_loop_proxy
-                            .send_event(MyEvent::OpenFileDialog)
+                            .send_event(ShadeyEvent::OpenFileDialog)
                             .ok()
                             .unwrap();
                     }
@@ -147,13 +142,13 @@ impl egui_wgpu_backend::epi::App for EguiState {
     }
 }
 
-impl EguiState {
+impl Egui {
     pub fn new(
         window: &Window,
         device: &wgpu::Device,
         config_format: wgpu::TextureFormat,
-        event_loop_proxy: &EventLoopProxy<MyEvent>,
-        gui_uniform: crate::Uniform,
+        event_loop: &EventLoop<ShadeyEvent>,
+        gui_uniform: Uniform,
     ) -> Self {
         let PhysicalSize {
             height: physical_height,
@@ -172,7 +167,7 @@ impl EguiState {
             platform,
             render_pass: egui_rpass,
             previous_frame_time: None,
-            event_loop_proxy: event_loop_proxy.clone(),
+            event_loop_proxy: event_loop.create_proxy(),
             gui_uniform,
             draw_right_panel: true,
         }
@@ -193,8 +188,9 @@ impl EguiState {
         let egui_ctx = &self.platform.context();
         let frame = MaybeUninit::<&mut egui_wgpu_backend::epi::Frame>::uninit();
         /////////////////////////
-        // Safety: We're not using the &mut frame in our implementation of update, therefore we invoke no undefined behaviour.
-        /////////////////////////
+        //
+        // Safety: &mut frame is not used self.update, therefore we invoke no undefined behaviour.
+        //
         self.update(egui_ctx, unsafe { frame.assume_init() });
         let (_output, paint_commands) = self.platform.end_frame(Some(window));
         let paint_jobs = egui_ctx.tessellate(paint_commands);

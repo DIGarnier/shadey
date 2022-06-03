@@ -1,4 +1,7 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use nom::{
     branch::alt,
@@ -10,7 +13,8 @@ use nom::{
     combinator::{recognize, success},
     error::{Error, ParseError},
     multi::{fold_many0, many0_count},
-    sequence::{delimited, pair, preceded, separated_pair, terminated}, IResult,
+    sequence::{delimited, pair, preceded, separated_pair, terminated},
+    IResult,
 };
 
 use crate::wgsl::{PType, StructSlot, TType};
@@ -138,39 +142,58 @@ pub fn parse_struct_named<'fc>(
         delimited(char('{'), take_until("}"), char('}')),
     )(input)?;
 
-    let (_, struct_slots) = fold_many0(struct_slot, || Vec::with_capacity(10), |mut acc: Vec<_>, item| {
-        acc.push(item);
-        acc
-    })(result)?;
+    let (_, struct_slots) = fold_many0(
+        struct_slot,
+        || Vec::with_capacity(10),
+        |mut acc: Vec<_>, item| {
+            acc.push(item);
+            acc
+        },
+    )(result)?;
 
     Ok((rest, struct_slots))
 }
 
-pub fn adjustment_for_safe_insert(
-    file_content: &str,
-    name: &str,
-) -> Option<usize> {
-    let (input, r1) = take_until::<_,_, Error<&str>>(name)(file_content).ok()?;
-    let (rest, _) = preceded::<_,_,_, Error<&str>,_,_>(
+pub fn adjustment_for_safe_insert(file_content: &str, name: &str) -> Option<usize> {
+    let (input, r1) = take_until::<_, _, Error<&str>>(name)(file_content).ok()?;
+    let (rest, _) = preceded::<_, _, _, Error<&str>, _, _>(
         terminated(tag(name), alt((tag(" "), tag("")))),
         delimited(char('{'), take_until("}"), char('}')),
-    )(input).ok()?;
+    )(input)
+    .ok()?;
 
     Some(r1.len() + input.len() - rest.len() + 3)
 }
-
-
-
 
 #[derive(Debug)]
 pub enum ShaderOptions {
     Texture {
         path: PathBuf,
-        alias: Option<String>,
+        name: String,
         u_addr_mode: Option<wgpu::AddressMode>,
         v_addr_mode: Option<wgpu::AddressMode>,
         w_addr_mode: Option<wgpu::AddressMode>,
     },
+    Something,
+}
+
+impl ShaderOptions {
+    pub fn is_texture_opt(&self) -> bool {
+        match self {
+            ShaderOptions::Texture { .. } => true,
+            _ => false,
+        }
+    }
+
+    pub fn texture(path: &Path, name: &String) -> ShaderOptions {
+        ShaderOptions::Texture {
+            path: path.into(),
+            name: name.to_owned(),
+            u_addr_mode: None,
+            v_addr_mode: None,
+            w_addr_mode: None,
+        }
+    }
 }
 
 type Arguments<'a> = HashMap<&'a str, &'a str>;
@@ -222,14 +245,14 @@ fn address_mode(input: &str) -> Option<wgpu::AddressMode> {
 
 fn texture(arguments: &Arguments) -> Option<ShaderOptions> {
     let path: PathBuf = arguments.get("path")?.into();
-    let alias = arguments.get("alias").map(|x| x.to_string());
+    let name = arguments.get("name")?.to_string();
     let u_addr_mode = arguments.get("u_mode").and_then(|x| address_mode(x));
     let v_addr_mode = arguments.get("v_mode").and_then(|x| address_mode(x));
     let w_addr_mode = arguments.get("w_mode").and_then(|x| address_mode(x));
 
     Some(ShaderOptions::Texture {
         path,
-        alias,
+        name,
         u_addr_mode,
         v_addr_mode,
         w_addr_mode,
@@ -251,11 +274,15 @@ pub fn shader_option(opt: &str) -> IResult<&str, ShaderOptions> {
 
 pub fn parse_options(file_content: &str) -> IResult<&str, Vec<ShaderOptions>> {
     let (input, _) = take_until("// Shadey")(file_content)?;
-    let (rest, _ ) = tag("// Shadey")(input)?;
+    let (rest, _) = tag("// Shadey")(input)?;
     let any_comment1 = delimited(ws(tag("//")), shader_option, crlf);
 
-    Ok(fold_many0(any_comment1, Vec::new, |mut acc: Vec<_>, item| {
-        acc.push(item);
-        acc
-    })(rest)?)
+    Ok(fold_many0(
+        any_comment1,
+        Vec::new,
+        |mut acc: Vec<_>, item| {
+            acc.push(item);
+            acc
+        },
+    )(rest)?)
 }
