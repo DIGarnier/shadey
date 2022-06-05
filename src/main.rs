@@ -28,7 +28,7 @@ fn main() {
 
     let event_loop_proxy = event_loop.create_proxy();
     event_loop.run(move |event, _, control_flow| {
-        app.ui.platform.handle_event(&event);
+        app.platform_handle_event(&event);
 
         match event {
             Event::WindowEvent {
@@ -43,6 +43,7 @@ fn main() {
                     Ok(_) => {}
                     Err(wgpu::SurfaceError::Lost) => {
                         app.resize((app.config.height, app.config.width).into())
+                        // try to reform valid surface
                     }
                     Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
                     Err(e) => eprintln!("{:?}", e),

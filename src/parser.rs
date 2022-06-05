@@ -11,13 +11,14 @@ use nom::{
         is_digit,
     },
     combinator::{recognize, success},
-    error::{Error, ParseError},
+    error::{Error, ErrorKind, ParseError},
+    error_position,
     multi::{fold_many0, many0_count},
     sequence::{delimited, pair, preceded, separated_pair, terminated},
     IResult,
 };
 
-use crate::wgsl::{PType, StructSlot, TType};
+use crate::wgsl::{PType, StructSlot, StructSlotOptions, TType};
 
 fn ws<'a, F: 'a, O, E: ParseError<&'a str>>(
     inner: F,
@@ -35,57 +36,54 @@ fn identifier(input: &str) -> IResult<&str, &str> {
     ))(input)
 }
 
+fn pscalar(name: &str, typed: PType) -> impl FnMut(&str) -> IResult<&str, PType> {
+    let name = name.to_owned();
+    move |input: &str| {
+        return tag(&name[..])(input).map(|(rest, _)| (rest, typed));
+    }
+}
+
 fn scalar(input: &str) -> IResult<&str, TType> {
-    let (rest, result) = alt((
-        tag("bool"),
-        tag("i32"),
-        tag("i64"),
-        tag("u32"),
-        tag("u64"),
-        tag("f16"),
-        tag("f32"),
-        tag("f64"),
-    ))(input)?;
-
-    let val = match result {
-        "bool" => PType::Bool,
-        "i32" => PType::I32,
-        "i64" => PType::I64,
-        "u32" => PType::U32,
-        "u64" => PType::U64,
-        "f16" => PType::F16,
-        "f32" => PType::F32,
-        "f64" => PType::F64,
-        _ => unreachable!(),
-    };
-
-    Ok((rest, TType::Scalar(val)))
+    alt((
+        pscalar("bool", PType::Bool),
+        pscalar("i32", PType::I32),
+        pscalar("i64", PType::I64),
+        pscalar("u32", PType::U32),
+        pscalar("u64", PType::U64),
+        pscalar("f16", PType::F16),
+        pscalar("f32", PType::F32),
+        pscalar("f64", PType::F64),
+    ))(input)
+    .map(|(rest, typed)| (rest, TType::Scalar(typed)))
 }
 
 fn vector(input: &str) -> IResult<&str, TType> {
     let (rest, n) = delimited(tag("vec"), take(1usize), tag("<"))(input)?;
-
     let (rest, result) = terminated(scalar, tag(">"))(rest)?;
 
     if let TType::Scalar(scalar_type) = result {
-        return Ok((rest, TType::Vector(n.parse().unwrap(), scalar_type)));
+        return Ok((
+            rest,
+            TType::Vector(
+                n.parse().or(Err(nom_error("n dim couldn't be parsed")))?,
+                scalar_type,
+            ),
+        ));
     }
     unreachable!();
 }
 
 fn matrix(input: &str) -> IResult<&str, TType> {
     let (rest, m_x_n) = delimited(tag("mat"), take(3usize), tag("<"))(input)?;
-
     let (_, (m, n)) = separated_pair(take(1usize), tag("x"), take(1usize))(m_x_n)?;
-
     let (rest, result) = terminated(scalar, tag(">"))(rest)?;
 
     if let TType::Scalar(scalar_type) = result {
         return Ok((
             rest,
             TType::Matrix {
-                m: m.parse().unwrap(),
-                n: n.parse().unwrap(),
+                m: m.parse().or(Err(nom_error("m dim couldn't be parsed")))?,
+                n: n.parse().or(Err(nom_error("n dim couldn't be parsed")))?,
                 typed: scalar_type,
             },
         ));
@@ -100,14 +98,18 @@ fn array(input: &str) -> IResult<&str, TType> {
         take_while(|c: char| is_digit(c as u8)),
     );
 
-    let (rest, e_comma_n) = delimited(tag("array<"), p, tag(">"))(input)?;
-    let (e, n) = e_comma_n;
-    Ok((rest, TType::Array(n.parse().unwrap(), e.into())))
+    let (rest, (e, n)) = delimited(tag("array<"), p, tag(">"))(input)?;
+    Ok((
+        rest,
+        TType::Array(
+            n.parse().or(Err(nom_error("n dim couldn't be parsed")))?,
+            e.into(),
+        ),
+    ))
 }
 
 fn typer(input: &str) -> IResult<&str, TType> {
     let (rest, type_value) = alt((scalar, vector, matrix, array))(input)?;
-
     let (rest, _) = alt((tag(";"), tag("")))(rest)?;
 
     Ok((rest, type_value))
@@ -119,15 +121,15 @@ fn any_comment(input: &str) -> IResult<&str, &str> {
 
 fn struct_slot(input: &str) -> IResult<&str, StructSlot> {
     let (rest, (identifier, typed)) = separated_pair(ws(identifier), tag(":"), ws(typer))(input)?;
-
     let (rest, comment) = alt((any_comment, success("")))(rest)?;
+    let options = structslot_option(comment).map(|(_, opt)| opt).ok();
 
     Ok((
         rest,
         StructSlot {
             identifier: identifier.to_owned(),
             typed,
-            comment: comment.to_owned(),
+            options,
         },
     ))
 }
@@ -198,24 +200,22 @@ impl ShaderOptions {
 
 type Arguments<'a> = HashMap<&'a str, &'a str>;
 
+fn nom_error(input: &str) -> nom::Err<Error<&str>> {
+    nom::Err::Error(error_position!(input, ErrorKind::Fail))
+}
+
 // EWW
 fn opt_and_value(input: &str) -> IResult<&str, (&str, &str)> {
     let (rest, name) = take_until("=")(input)?;
 
     if name.is_empty() {
-        return Err(nom::Err::Failure(Error::new(
-            "argument name can't be empty",
-            nom::error::ErrorKind::Fail,
-        )));
+        return Err(nom_error(input));
     }
 
     let (rest, value) = take_while(|c: char| c != ',')(&rest[1..])?;
 
     if value.is_empty() {
-        return Err(nom::Err::Failure(Error::new(
-            "value can't be empty",
-            nom::error::ErrorKind::Fail,
-        )));
+        return Err(nom_error(&rest[1..]));
     }
 
     Ok((rest, (name, value)))
@@ -243,33 +243,28 @@ fn address_mode(input: &str) -> Option<wgpu::AddressMode> {
     }
 }
 
-fn texture(arguments: &Arguments) -> Option<ShaderOptions> {
-    let path: PathBuf = arguments.get("path")?.into();
-    let name = arguments.get("name")?.to_string();
-    let u_addr_mode = arguments.get("u_mode").and_then(|x| address_mode(x));
-    let v_addr_mode = arguments.get("v_mode").and_then(|x| address_mode(x));
-    let w_addr_mode = arguments.get("w_mode").and_then(|x| address_mode(x));
+fn texture(opt: &str) -> IResult<&str, ShaderOptions> {
+    let (rest, _) = tag("texture")(opt)?;
+    let (rest, arguments) = arguments(rest)?;
 
-    Some(ShaderOptions::Texture {
-        path,
-        name,
-        u_addr_mode,
-        v_addr_mode,
-        w_addr_mode,
-    })
+    Ok((
+        rest,
+        ShaderOptions::Texture {
+            path: arguments.get("path").ok_or(nom_error(rest))?.into(),
+            name: arguments.get("name").ok_or(nom_error(rest))?.to_string(),
+            u_addr_mode: arguments.get("u_mode").and_then(|x| address_mode(x)),
+            v_addr_mode: arguments.get("v_mode").and_then(|x| address_mode(x)),
+            w_addr_mode: arguments.get("w_mode").and_then(|x| address_mode(x)),
+        },
+    ))
+}
+
+fn something(opt: &str) -> IResult<&str, ShaderOptions> {
+    tag("something")(opt).map(|(rest, _)| (rest, ShaderOptions::Something))
 }
 
 pub fn shader_option(opt: &str) -> IResult<&str, ShaderOptions> {
-    let (rest, result) = alt((tag("texture"), tag("something")))(opt)?;
-
-    let (rest, arguments) = arguments(rest)?;
-
-    let option = match result {
-        "texture" => texture(&arguments),
-        _ => unreachable!(),
-    };
-
-    Ok((rest, option.unwrap()))
+    alt((texture, something))(opt)
 }
 
 pub fn parse_options(file_content: &str) -> IResult<&str, Vec<ShaderOptions>> {
@@ -285,4 +280,25 @@ pub fn parse_options(file_content: &str) -> IResult<&str, Vec<ShaderOptions>> {
             acc
         },
     )(rest)?)
+}
+
+fn range(comment: &str) -> IResult<&str, StructSlotOptions> {
+    let (rest, _) = tag("range")(comment)?;
+    let (rest2, arguments) = arguments(rest)?;
+
+    let min = arguments
+        .get("min")
+        .ok_or(nom_error(rest))?
+        .parse::<f32>()
+        .or(Err(nom_error("Min couldn't be parsed")))?;
+    let max = arguments
+        .get("max")
+        .ok_or(nom_error(rest))?
+        .parse::<f32>()
+        .or(Err(nom_error("Max couldn't be parsed")))?;
+    Ok((rest2, StructSlotOptions::Slider { range: min..=max }))
+}
+
+pub fn structslot_option(comment: &str) -> IResult<&str, StructSlotOptions> {
+    range(comment)
 }

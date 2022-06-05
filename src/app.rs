@@ -8,15 +8,13 @@ use notify::{DebouncedEvent, ReadDirectoryChangesWatcher, RecursiveMode, Watcher
 use wgpu::BindGroupLayout;
 
 use winit::{
-    event::{ElementState, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent},
+    event::{ElementState, Event, KeyboardInput, MouseButton, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop, EventLoopProxy},
     window::{Window, WindowBuilder, WindowId},
 };
 
 use crate::{
-    shader::{
-        ShaderFileBuf, ShaderFileBuilder, Uniform, UniformChoice, GUICONTROLLED_DEF,
-    },
+    shader::{ShaderFileBuf, ShaderFileBuilder, Uniform, UniformChoice, GUICONTROLLED_DEF},
     texture::Texture,
     ui::{Egui, ShadeyEvent},
     wgsl::Sized,
@@ -30,11 +28,11 @@ pub struct App {
     queue: wgpu::Queue,
     pub config: wgpu::SurfaceConfiguration,
     render_pipeline: wgpu::RenderPipeline,
-    pub std_uniform: Uniform,
+    std_uniform: Uniform,
     bind_groups: Vec<wgpu::BindGroup>,
     textures: Vec<Texture>,
-    pub start_instant: Instant,
-    pub ui: Egui,
+    start_instant: Instant,
+    ui: Egui,
     file_watcher: ReadDirectoryChangesWatcher,
     old_shader_path: PathBuf,
 }
@@ -110,9 +108,9 @@ impl App {
             create_texture_bind_groups(&device, &textures, &texture_bind_group_layouts);
 
         let bind_group_layout = create_main_bind_group_layout(&device, &std_uniform, &gui_uniform);
-        let bind_group_layouts: Vec<BindGroupLayout> = std::iter::once(bind_group_layout)
+        let bind_group_layouts = std::iter::once(bind_group_layout)
             .chain(texture_bind_group_layouts.into_iter())
-            .collect();
+            .collect::<Vec<_>>();
 
         let bind_group = create_main_bind_group(
             &device,
@@ -186,9 +184,7 @@ impl App {
                     .dynamic_struct
                     .read_from_slot_ref_mut::<[u32; 2]>(2) // slot 2 is mouse_pos
                     .to_owned();
-                self.std_uniform
-                    .dynamic_struct
-                    .write_to_slot::<[u32; 2]>(4, &mouse_pos); // slot 4 is toggle_mouse_pos
+                self.std_uniform.dynamic_struct.write_to_slot(4, &mouse_pos); // slot 4 is toggle_mouse_pos
                 true
             }
             _ => false,
@@ -416,6 +412,10 @@ impl App {
 
     pub fn request_redraw(&self) {
         self.window.request_redraw();
+    }
+
+    pub fn platform_handle_event(&mut self, event: &Event<ShadeyEvent>) {
+        self.ui.platform.handle_event(event);
     }
 }
 

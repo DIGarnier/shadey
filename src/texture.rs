@@ -1,9 +1,6 @@
-
-use std::fs;
-
 use image::GenericImageView;
 
-use crate::{parser::ShaderOptions};
+use crate::parser::ShaderOptions;
 
 pub struct Texture {
     pub texture: wgpu::Texture,
@@ -12,7 +9,6 @@ pub struct Texture {
     pub name: String,
 }
 
-
 impl Texture {
     pub fn generate_definition(&self, group_id: usize) -> String {
         format!(
@@ -20,8 +16,14 @@ impl Texture {
             var t_diffuse{group_id}: texture_2d<f32>; \n\
             [[group({group_id}), binding(1)]] \n\
             var s_diffuse{group_id}: sampler; \n\
+            fn texture_{name}_size() -> vec2<f32> {{ return vec2<f32>(textureDimensions(t_diffuse{group_id}));}} \n\
             fn texture_{name}(vx: vec2<f32>) -> vec4<f32> \n\
-            {{ return textureSample(t_diffuse{group_id}, s_diffuse{group_id}, flipy(vx));}}"
+            {{ \n\
+                let texdim = texture_{name}_size(); \n\
+                let ratio = f32(texdim.x)/f32(texdim.y); \n\
+                let flip = flipy(vec2<f32>(vx.x, vx.y*ratio));
+                return textureSample(t_diffuse{group_id}, s_diffuse{group_id}, flip);\n\
+            }}"
             ,
             group_id=group_id+1,
             name=self.name
@@ -36,8 +38,8 @@ impl Texture {
         options: &ShaderOptions,
     ) -> Option<Self> {
         if let ShaderOptions::Texture { path, .. } = options {
-            let texture_content = fs::read(path).ok()?;
-            return Self::from_bytes(device, queue, &texture_content, options)
+            let texture_content = std::fs::read(path).ok()?;
+            return Self::from_bytes(device, queue, &texture_content, options);
         }
 
         None
@@ -52,8 +54,7 @@ impl Texture {
         Self::from_image(device, queue, &img, options)
     }
 
-
-    // yoinked from https://sotrh.github.io/learn-wgpu/beginner/tutorial5-textures/#cleaning-things-up
+    // partially yoinked from https://sotrh.github.io/learn-wgpu/beginner/tutorial5-textures/#cleaning-things-up
     pub fn from_image(
         device: &wgpu::Device,
         queue: &wgpu::Queue,

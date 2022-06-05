@@ -1,26 +1,48 @@
-use std::{mem::MaybeUninit, path::PathBuf, time::Instant};
+use std::{path::PathBuf, time::Instant};
 
-use egui_wgpu_backend::{epi::App, ScreenDescriptor};
+use egui_wgpu_backend::ScreenDescriptor;
 use egui_winit_platform::{Platform, PlatformDescriptor};
 use wgpu::{CommandEncoder, TextureView};
-use winit::{dpi::PhysicalSize, event_loop::{EventLoopProxy, EventLoop}, window::Window};
+use winit::{
+    dpi::PhysicalSize,
+    event_loop::{EventLoop, EventLoopProxy},
+    window::Window,
+};
 
-use crate::{wgsl::{DynamicStruct, PType, TType}, shader::Uniform};
+use crate::{
+    shader::Uniform,
+    wgsl::{DynamicStruct, PType, StructSlotOptions, TType},
+};
 
 fn ui_f32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
+    let range = gui_struct.slots[slot - 1]
+        .options
+        .as_ref()
+        .map_or(0.0..=1.0, |x| {
+            let StructSlotOptions::Slider { range } = x;
+            range.to_owned()
+        });
     let data = gui_struct.read_from_slot_ref_mut::<f32>(slot);
     ui.horizontal(|ui| {
-        ui.add(egui::widgets::Slider::new(data, 0.0..=1.0));
+        ui.add(egui::widgets::Slider::new(data, range));
         ui.label(identifier);
     });
 }
 
 fn ui_u32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
+    let range = gui_struct.slots[slot - 1]
+        .options
+        .as_ref()
+        .map_or(0..=100, |x| {
+            let StructSlotOptions::Slider { range } = x;
+            let (s, e) = (*range.start(), *range.end());
+            s as u32..=e as u32
+        });
     let data = gui_struct.read_from_slot_ref_mut::<u32>(slot);
     ui.horizontal(|ui| {
-        ui.add(egui::widgets::Slider::new(data, 0..=100));
+        ui.add(egui::widgets::Slider::new(data, range));
         ui.label(identifier);
     });
 }
@@ -108,40 +130,6 @@ pub struct Egui {
     draw_right_panel: bool,
 }
 
-impl egui_wgpu_backend::epi::App for Egui {
-    fn name(&self) -> &str {
-        "Shadey"
-    }
-
-    fn update(&mut self, ctx: &egui::CtxRef, _frame: &mut egui_wgpu_backend::epi::Frame<'_>) {
-        
-        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-            use egui::*;
-            
-            menu::bar(ui, |ui| {
-                menu::menu(ui, "Shader", |ui| {
-                    if ui.button("Open...").clicked() {
-                        self.event_loop_proxy
-                            .send_event(ShadeyEvent::OpenFileDialog)
-                            .ok()
-                            .unwrap();
-                    }
-                });
-                ui.add_space(ui.available_width() - 90.0 );
-                ui.checkbox(&mut self.draw_right_panel, " Draw Panel?");
-            });
-            
-        });
-        if self.draw_right_panel {
-            generate_auto_ui(ctx, &mut self.gui_uniform.dynamic_struct);
-        }
-    }
-
-    fn clear_color(&self) -> egui::Rgba {
-        egui::Color32::TRANSPARENT.into()
-    }
-}
-
 impl Egui {
     pub fn new(
         window: &Window,
@@ -184,14 +172,8 @@ impl Egui {
     ) {
         let start = Instant::now();
         self.platform.begin_frame();
-
         let egui_ctx = &self.platform.context();
-        let frame = MaybeUninit::<&mut egui_wgpu_backend::epi::Frame>::uninit();
-        /////////////////////////
-        //
-        // Safety: &mut frame is not used self.update, therefore we invoke no undefined behaviour.
-        //
-        self.update(egui_ctx, unsafe { frame.assume_init() });
+        self.update(egui_ctx);
         let (_output, paint_commands) = self.platform.end_frame(Some(window));
         let paint_jobs = egui_ctx.tessellate(paint_commands);
         self.previous_frame_time = (Instant::now() - start).as_secs_f32().into();
@@ -209,5 +191,27 @@ impl Egui {
         self.render_pass
             .execute(encoder, view, &paint_jobs, &screen_descriptor, None)
             .unwrap();
+    }
+
+    fn update(&mut self, ctx: &egui::CtxRef) {
+        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+            use egui::*;
+
+            menu::bar(ui, |ui| {
+                menu::menu(ui, "Shader", |ui| {
+                    if ui.button("Open...").clicked() {
+                        self.event_loop_proxy
+                            .send_event(ShadeyEvent::OpenFileDialog)
+                            .ok()
+                            .unwrap();
+                    }
+                });
+                ui.add_space(ui.available_width() - 90.0);
+                ui.checkbox(&mut self.draw_right_panel, " Draw Panel?");
+            });
+        });
+        if self.draw_right_panel {
+            generate_auto_ui(ctx, &mut self.gui_uniform.dynamic_struct);
+        }
     }
 }

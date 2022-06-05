@@ -1,4 +1,6 @@
-#[derive(Debug, Clone, PartialEq)]
+use std::ops::RangeInclusive;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PType {
     Bool,
     I32,
@@ -21,10 +23,10 @@ impl From<&PType> for String {
             PType::F16 => "f16",
             PType::F32 => "f32",
             PType::F64 => "f64",
-        }.to_owned()
+        }
+        .to_owned()
     }
 }
-
 
 pub trait Sized {
     fn size(&self) -> usize;
@@ -117,19 +119,23 @@ fn offset_of_member(struc: &Vec<StructSlot>, slot: usize) -> usize {
 }
 
 #[derive(Debug, PartialEq)]
+pub enum StructSlotOptions {
+    Slider { range: RangeInclusive<f32> },
+}
+
+#[derive(Debug, PartialEq)]
 pub struct StructSlot {
     pub identifier: String,
     pub typed: TType,
-    pub comment: String,
+    pub options: Option<StructSlotOptions>,
 }
 
 impl StructSlot {
     pub fn generate_definition(&self) -> String {
         format!(
-            "fn {ident}() -> {typed} {{return _gui.{ident};}}"
-            ,
-            ident=self.identifier,
-            typed=String::from(&self.typed)
+            "fn {ident}() -> {typed} {{return _gui.{ident};}}",
+            ident = self.identifier,
+            typed = String::from(&self.typed)
         )
     }
 }
