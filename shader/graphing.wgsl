@@ -38,6 +38,16 @@ fn rot2d(pos: vec2<f32>, o: f32) -> vec2<f32> {
     return vec2<f32>(pos.x*coso-pos.y*sino, pos.x*sino+pos.y*coso);
 }
 
+fn f(x: f32) -> f32 {
+    let r = 0.2;
+    return sqrt(r*r-x*x);
+}
+
+fn grad(x: f32) -> f32
+{
+    let h = 0.01;
+    return (f(x+h) - f(x))/(2.0*h);
+}
 
 // Fragment shader
 [[stage(fragment)]]
@@ -46,13 +56,12 @@ fn fs_main(vo: VertexOutput) -> [[location(0)]] vec4<f32> {
 
     var spos = screen_coords(vo, vec2<f32>(0.5));
 
-    spos = rot2d(spos, t) * 5.0;
 
-    spos = rot2d(spos, sin(length(spos)*10.*x()+t*2.));
-    var cir = circle(spos, circle_scale());
-    var v = vec3<f32>(abs(swirl(spos)*cir));
-    let eps = 0.03;
-    var col = smoothStep(color(), vec3<f32>(0.0), v);
+
+    let eps = circle_scale();
+    let wow = abs(f(spos.x) - spos.y)/sqrt(1.0+grad(spos.x)*grad(spos.x));
+    
+    var col = vec3<f32>(smoothStep(1.0*eps, 2.0*eps, wow ));
 
     return vec4<f32>(col,1.);
 }
