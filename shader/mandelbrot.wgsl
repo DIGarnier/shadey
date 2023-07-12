@@ -63,7 +63,7 @@ fn fs_main(vo: VertexOutput) -> [[location(0)]] vec4<f32> {
                 (vec2<f32>(f32(m),f32(n)) - 0.5* f32(AA)) / f32(AA*1000u);
 
             var p = screen_coords(vo, coords); 
-            var pos = vec2<f32>(-0.83, 0.2) +  (p * 3.0)*anim;
+            var pos = vec2<f32>(-0.83, 0.2) +  (p*scale())*anim;
             
             col = col + mandelbrot(timespan(), pos);
         }

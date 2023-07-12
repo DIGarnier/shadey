@@ -18,7 +18,7 @@ use nom::{
     IResult,
 };
 
-use crate::wgsl::{PType, StructSlot, StructSlotOptions, TType};
+use super::wgsl::{PType, StructSlot, StructSlotOptions, TType};
 
 fn ws<'a, F: 'a, O, E: ParseError<&'a str>>(
     inner: F,
@@ -38,9 +38,7 @@ fn identifier(input: &str) -> IResult<&str, &str> {
 
 fn pscalar(name: &str, typed: PType) -> impl FnMut(&str) -> IResult<&str, PType> {
     let name = name.to_owned();
-    move |input: &str| {
-        return tag(&name[..])(input).map(|(rest, _)| (rest, typed));
-    }
+    move |input: &str| tag(&name[..])(input).map(|(rest, _)| (rest, typed))
 }
 
 fn scalar(input: &str) -> IResult<&str, TType> {
@@ -65,7 +63,7 @@ fn vector(input: &str) -> IResult<&str, TType> {
         return Ok((
             rest,
             TType::Vector(
-                n.parse().or(Err(nom_error("n dim couldn't be parsed")))?,
+                n.parse().map_err(|_| nom_error("n dim couldn't be parsed"))?,
                 scalar_type,
             ),
         ));
@@ -82,8 +80,8 @@ fn matrix(input: &str) -> IResult<&str, TType> {
         return Ok((
             rest,
             TType::Matrix {
-                m: m.parse().or(Err(nom_error("m dim couldn't be parsed")))?,
-                n: n.parse().or(Err(nom_error("n dim couldn't be parsed")))?,
+                m: m.parse().map_err(|_| nom_error("m dim couldn't be parsed"))?,
+                n: n.parse().map_err(|_| nom_error("n dim couldn't be parsed"))?,
                 typed: scalar_type,
             },
         ));
@@ -102,7 +100,7 @@ fn array(input: &str) -> IResult<&str, TType> {
     Ok((
         rest,
         TType::Array(
-            n.parse().or(Err(nom_error("n dim couldn't be parsed")))?,
+            n.parse().map_err(|_| nom_error("n dim couldn't be parsed"))?,
             e.into(),
         ),
     ))
@@ -181,10 +179,7 @@ pub enum ShaderOptions {
 
 impl ShaderOptions {
     pub fn is_texture_opt(&self) -> bool {
-        match self {
-            ShaderOptions::Texture { .. } => true,
-            _ => false,
-        }
+        matches!(self, ShaderOptions::Texture { .. })
     }
 
     pub fn texture(path: &Path, name: &String) -> ShaderOptions {
@@ -250,8 +245,11 @@ fn texture(opt: &str) -> IResult<&str, ShaderOptions> {
     Ok((
         rest,
         ShaderOptions::Texture {
-            path: arguments.get("path").ok_or(nom_error(rest))?.into(),
-            name: arguments.get("name").ok_or(nom_error(rest))?.to_string(),
+            path: arguments.get("path").ok_or_else(|| nom_error(rest))?.into(),
+            name: arguments
+                .get("name")
+                .ok_or_else(|| nom_error(rest))?
+                .to_string(),
             u_addr_mode: arguments.get("u_mode").and_then(|x| address_mode(x)),
             v_addr_mode: arguments.get("v_mode").and_then(|x| address_mode(x)),
             w_addr_mode: arguments.get("w_mode").and_then(|x| address_mode(x)),
@@ -272,14 +270,10 @@ pub fn parse_options(file_content: &str) -> IResult<&str, Vec<ShaderOptions>> {
     let (rest, _) = tag("// Shadey")(input)?;
     let any_comment1 = delimited(ws(tag("//")), shader_option, crlf);
 
-    Ok(fold_many0(
-        any_comment1,
-        Vec::new,
-        |mut acc: Vec<_>, item| {
-            acc.push(item);
-            acc
-        },
-    )(rest)?)
+    fold_many0(any_comment1, Vec::new, |mut acc: Vec<_>, item| {
+        acc.push(item);
+        acc
+    })(rest)
 }
 
 fn range(comment: &str) -> IResult<&str, StructSlotOptions> {
@@ -288,14 +282,14 @@ fn range(comment: &str) -> IResult<&str, StructSlotOptions> {
 
     let min = arguments
         .get("min")
-        .ok_or(nom_error(rest))?
+        .ok_or_else(|| nom_error(rest))?
         .parse::<f32>()
-        .or(Err(nom_error("Min couldn't be parsed")))?;
+        .map_err(|_| nom_error("Min couldn't be parsed"))?;
     let max = arguments
         .get("max")
-        .ok_or(nom_error(rest))?
+        .ok_or_else(|| nom_error(rest))?
         .parse::<f32>()
-        .or(Err(nom_error("Max couldn't be parsed")))?;
+        .map_err(|_| nom_error("Max couldn't be parsed"))?;
     Ok((rest2, StructSlotOptions::Slider { range: min..=max }))
 }
 

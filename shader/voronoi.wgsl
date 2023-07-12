@@ -55,15 +55,13 @@ fn fs_main(vo: VertexOutput) -> [[location(0)]] vec4<f32> {
         let i = idx + 1u;
         points[idx] = random2(vec2<f32>(f32(i), f32(i)), f32(i)/323132.0) + 
             normalize(random2(vec2<f32>(-f32(i), f32(i)), f32(i)))/1.5*sin(time()*speed());
-        let dist = distance(pos, points[idx])*distance_percent() + cosine_distance(pos, points[idx])*(1.0-distance_percent());
-        // let dist = minkowski_distance(pos, points[idx], distance_percent()*4.0 - 2.0);
+        let dist = distance(pos, points[idx])*distance_percent() + taxicab_distance(pos, points[idx])*(1.0-distance_percent());
         if (dist < min_dist) {
             min_dist = dist;
             id = i;
         }
     }
 
-    // color = color + min_dist;
     let rando_noise = vec3<f32>(random(vec2<f32>(f32(id))),random(vec2<f32>(f32(id+1u))),random(vec2<f32>(f32(id+2u))));
     color = object_color() + normalize(rando_noise)*influence();
 

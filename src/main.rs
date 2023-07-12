@@ -22,7 +22,6 @@ use app::App;
 use winit::{event::Event, event_loop::ControlFlow};
 
 fn main() {
-    env_logger::init();
     let event_loop = winit::event_loop::EventLoop::with_user_event();
     let mut app = pollster::block_on(App::new(&event_loop));
 
@@ -34,28 +33,20 @@ fn main() {
             Event::WindowEvent {
                 event: ref window_event,
                 window_id,
-            } => {
-                app.handle_window_event(window_id, control_flow, window_event);
-            }
+            } => app.handle_window_event(window_id, control_flow, window_event),
             Event::RedrawRequested(_) => {
                 app.update();
                 match app.render() {
                     Ok(_) => {}
-                    Err(wgpu::SurfaceError::Lost) => {
-                        app.resize((app.config.height, app.config.width).into())
-                        // try to reform valid surface
-                    }
+                    Err(wgpu::SurfaceError::Lost) => app.resize((app.config.height, app.config.width).into()),
                     Err(wgpu::SurfaceError::OutOfMemory) => *control_flow = ControlFlow::Exit,
                     Err(e) => eprintln!("{:?}", e),
                 }
             }
-            Event::MainEventsCleared => {
-                app.request_redraw();
-            }
-            Event::UserEvent(user_event) => {
-                app.handle_user_event(user_event, &event_loop_proxy);
-            }
-            _ => {}
+            Event::MainEventsCleared => app.request_redraw(),
+            Event::UserEvent(user_event) => app.handle_user_event(user_event, &event_loop_proxy),
+            _ => ()
         }
     });
 }
+

@@ -9,12 +9,12 @@ use winit::{
     window::Window,
 };
 
-use crate::{
+use super::{
     shader::Uniform,
-    wgsl::{DynamicStruct, PType, StructSlotOptions, TType},
+    wgsl::{RuntimeStruct, PType, StructSlotOptions, TType},
 };
 
-fn ui_f32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
+fn ui_f32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
     let range = gui_struct.slots[slot - 1]
         .options
@@ -30,7 +30,7 @@ fn ui_f32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
     });
 }
 
-fn ui_u32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
+fn ui_u32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
     let range = gui_struct.slots[slot - 1]
         .options
@@ -38,7 +38,7 @@ fn ui_u32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
         .map_or(0..=100, |x| {
             let StructSlotOptions::Slider { range } = x;
             let (s, e) = (*range.start(), *range.end());
-            s as u32..=e as u32
+            s as _..=e as _
         });
     let data = gui_struct.read_from_slot_ref_mut::<u32>(slot);
     ui.horizontal(|ui| {
@@ -47,7 +47,7 @@ fn ui_u32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
     });
 }
 
-fn ui_vec3f32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
+fn ui_vec3f32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
     let data = gui_struct.read_from_slot_ref_mut::<[f32; 3]>(slot);
     ui.horizontal(|ui| {
@@ -56,7 +56,7 @@ fn ui_vec3f32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
     });
 }
 
-fn ui_vec4f32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
+fn ui_vec4f32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
     let data = gui_struct.read_from_slot_ref_mut::<[f32; 4]>(slot);
     ui.horizontal(|ui| {
@@ -65,7 +65,7 @@ fn ui_vec4f32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
     });
 }
 
-fn ui_vec3u32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
+fn ui_vec3u32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
     let mut data = gui_struct
         .read_from_slot_ref_mut::<[u32; 3]>(slot)
@@ -75,10 +75,10 @@ fn ui_vec3u32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
         ui.label(identifier);
     });
 
-    gui_struct.write_to_slot::<[u32; 3]>(slot, &data.map(|x| (x * 255.0) as u32));
+    gui_struct.write_to_slot::<[u32; 3]>(slot, &data.map(|x| (x * 255.0) as _));
 }
 
-fn ui_vec4u32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
+fn ui_vec4u32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
     let mut data = gui_struct
         .read_from_slot_ref_mut::<[u32; 4]>(slot)
@@ -87,10 +87,10 @@ fn ui_vec4u32(ui: &mut egui::Ui, gui_struct: &mut DynamicStruct, slot: usize) {
         ui.color_edit_button_rgba_unmultiplied(&mut data);
         ui.label(identifier);
     });
-    gui_struct.write_to_slot::<[u32; 4]>(slot, &data.map(|x| (x * 255.0) as u32));
+    gui_struct.write_to_slot::<[u32; 4]>(slot, &data.map(|x| (x * 255.0) as _));
 }
 
-pub fn generate_auto_ui(ctx: &egui::CtxRef, gui_struct: &mut DynamicStruct) {
+pub fn generate_auto_ui(ctx: &egui::CtxRef, gui_struct: &mut RuntimeStruct) {
     egui::SidePanel::right("autogen_ui").show(ctx, |ui| {
         use egui::*;
         trace!(ui);
@@ -98,8 +98,8 @@ pub fn generate_auto_ui(ctx: &egui::CtxRef, gui_struct: &mut DynamicStruct) {
         for i in 0..gui_struct.slots.len() {
             let actual_slot = i + 1;
 
-            use PType::*;
             use TType::*;
+            use PType::*;
             match &gui_struct.slots[i].typed {
                 Scalar(F32) => ui_f32(ui, gui_struct, actual_slot),
                 Scalar(U32) => ui_u32(ui, gui_struct, actual_slot),

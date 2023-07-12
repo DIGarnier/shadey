@@ -13,7 +13,7 @@ use winit::{
     window::{Window, WindowBuilder, WindowId},
 };
 
-use crate::{
+use super::{
     shader::{ShaderFileBuf, ShaderFileBuilder, Uniform, UniformChoice, GUICONTROLLED_DEF},
     texture::Texture,
     ui::{Egui, ShadeyEvent},
@@ -43,7 +43,7 @@ impl App {
             .with_visible(false)
             .with_title("Shadey - ur shader toy")
             .with_maximized(true)
-            .build(&event_loop)
+            .build(event_loop)
             .expect("Window to be created without problem");
         let instance = wgpu::Instance::new(wgpu::Backends::VULKAN);
         let surface = unsafe { instance.create_surface(&window) };
@@ -192,7 +192,7 @@ impl App {
     }
 
     pub fn update(&mut self) {
-        let time_elapsed = (Instant::now() - self.start_instant).as_secs_f64();
+        let time_elapsed = self.start_instant.elapsed().as_secs_f64();
         self.ui.platform.update_time(time_elapsed);
 
         self.std_uniform.dynamic_struct.write_to_slot(
@@ -242,7 +242,7 @@ impl App {
 
             render_pass.set_pipeline(&self.render_pipeline);
             for (i, group) in self.bind_groups.iter().enumerate() {
-                render_pass.set_bind_group(i as u32, &group, &[]);
+                render_pass.set_bind_group(i as _, group, &[]);
             }
 
             render_pass.draw(0..3, 0..1);
@@ -290,7 +290,7 @@ impl App {
                 let (shader_content, candidate_uniform, textures) = {
                     let maybe_shader_builder = ShaderFileBuilder::new(&new_shader_path);
 
-                    if let None = maybe_shader_builder {
+                    if maybe_shader_builder.is_none() {
                         eprintln!("Shader wasn't found");
                         return;
                     }
@@ -399,11 +399,9 @@ impl App {
                         },
                     ..
                 } => *control_flow = ControlFlow::Exit,
-                WindowEvent::Resized(physical_size) => {
-                    self.resize(*physical_size);
-                }
+                WindowEvent::Resized(physical_size) => self.resize(*physical_size),
                 WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                    self.resize(**new_inner_size);
+                    self.resize(**new_inner_size)
                 }
                 _ => {}
             }
@@ -439,7 +437,7 @@ fn create_shader_module(
     });
     let shader_module = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
         label: None,
-        source: wgpu::ShaderSource::Wgsl(shader_content.content.clone().into()),
+        source: wgpu::ShaderSource::Wgsl(shader_content.as_ref().into()),
     });
 
     if unsafe { VALID } {
@@ -451,7 +449,7 @@ fn create_shader_module(
 
 fn create_render_pipeline(
     device: &wgpu::Device,
-    bind_group_layouts: &Vec<wgpu::BindGroupLayout>,
+    bind_group_layouts: &[wgpu::BindGroupLayout],
     config_format: wgpu::TextureFormat,
     shader_module: &wgpu::ShaderModule,
 ) -> wgpu::RenderPipeline {
@@ -561,7 +559,7 @@ fn create_main_bind_group(
 fn create_texture_bind_groups(
     device: &wgpu::Device,
     textures: &Vec<Texture>,
-    texture_bind_group_layouts: &Vec<wgpu::BindGroupLayout>,
+    texture_bind_group_layouts: &[wgpu::BindGroupLayout],
 ) -> Vec<wgpu::BindGroup> {
     (0..textures.len())
         .map(|i| {

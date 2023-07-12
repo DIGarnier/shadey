@@ -1,6 +1,6 @@
 use std::ops::RangeInclusive;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PType {
     Bool,
     I32,
@@ -14,15 +14,16 @@ pub enum PType {
 
 impl From<&PType> for String {
     fn from(ptype: &PType) -> Self {
+        use PType::*;
         match ptype {
-            PType::Bool => "bool",
-            PType::I32 => "i32",
-            PType::I64 => "i64",
-            PType::U32 => "u32",
-            PType::U64 => "u64",
-            PType::F16 => "f16",
-            PType::F32 => "f32",
-            PType::F64 => "f64",
+            Bool => "bool",
+            I32 => "i32",
+            I64 => "i64",
+            U32 => "u32",
+            U64 => "u64",
+            F16 => "f16",
+            F32 => "f32",
+            F64 => "f64",
         }
         .to_owned()
     }
@@ -38,24 +39,26 @@ pub trait Aligned {
 
 impl Sized for PType {
     fn size(&self) -> usize {
+        use PType::*;
         match self {
-            PType::Bool => 1,
-            PType::F16 => 2,
-            PType::I32 | PType::U32 | PType::F32 => 4,
-            PType::I64 | PType::U64 | PType::F64 => 8,
+            Bool => 1,
+            F16 => 2,
+            I32 | U32 | F32 => 4,
+            I64 | U64 | F64 => 8,
         }
     }
 }
 
 impl Aligned for PType {
     fn align(&self) -> usize {
+        use PType::*;
         match self {
-            PType::F16 => 2,
-            PType::I32 | PType::U32 | PType::F32 => 4,
-            PType::Bool => unreachable!(),
-            PType::I64 => unreachable!(),
-            PType::U64 => unreachable!(),
-            PType::F64 => unreachable!(),
+            F16 => 2,
+            I32 | U32 | F32 => 4,
+            Bool => unreachable!(),
+            I64 => unreachable!(),
+            U64 => unreachable!(),
+            F64 => unreachable!(),
         }
     }
 }
@@ -70,11 +73,12 @@ pub enum TType {
 
 impl From<&TType> for String {
     fn from(ttype: &TType) -> Self {
+        use TType::*;
         match ttype {
-            TType::Scalar(x) => x.into(),
-            TType::Vector(n, x) => format!("vec{}<{}>", n, String::from(x)),
-            TType::Matrix { m, n, typed } => format!("mat{}x{}<{}>", m, n, String::from(typed)),
-            TType::Array(n, x) => format!("array<{},{}>", String::from(&**x), n),
+            Scalar(x) => x.into(),
+            Vector(n, x) => format!("vec{}<{}>", n, String::from(x)),
+            Matrix { m, n, typed } => format!("mat{}x{}<{}>", m, n, String::from(typed)),
+            Array(n, x) => format!("array<{},{}>", String::from(&**x), n),
         }
     }
 }
@@ -97,7 +101,7 @@ impl Aligned for TType {
         match self {
             Scalar(x) => x.align(),
             Vector(nb, x) => (*nb as usize * x.align()).next_power_of_two(),
-            Matrix { n, typed: x, .. } => Vector(*n, x.clone()).align(),
+            Matrix { n, typed: x, .. } => Vector(*n, *x).align(),
             Array(_n, x) => x.align(),
         }
     }
@@ -141,24 +145,22 @@ impl StructSlot {
 }
 
 #[derive(Debug)]
-pub struct DynamicStruct {
+pub struct RuntimeStruct {
     pub slots: Vec<StructSlot>,
     buffer: Vec<u8>,
 }
 
-impl DynamicStruct {
+impl RuntimeStruct {
     pub fn new(slots: Vec<StructSlot>) -> Self {
         let mut buffer = Vec::with_capacity(slots.size());
         buffer.resize_with(slots.size(), Default::default);
         Self { slots, buffer }
     }
 
-    pub fn write_to_slot<T: bytemuck::Pod>(&mut self, slot: usize, data: &T) -> () {
+    pub fn write_to_slot<T: bytemuck::Pod>(&mut self, slot: usize, data: &T) {
         let data_bufer = bytemuck::bytes_of(data);
         let slot_offset = offset_of_member(&self.slots, slot);
-        for i in 0..data_bufer.len() {
-            self.buffer[i + slot_offset] = data_bufer[i];
-        }
+        self.buffer[slot_offset..data_bufer.len() + slot_offset].copy_from_slice(data_bufer);
     }
 
     pub fn get_slot_number(&self, slot_name: &str) -> Option<usize> {
@@ -186,7 +188,7 @@ impl DynamicStruct {
 
 impl Sized for Vec<StructSlot> {
     fn size(&self) -> usize {
-        let n = offset_of_member(&self, self.len()) + self.last().unwrap().typed.size();
+        let n = offset_of_member(self, self.len()) + self.last().unwrap().typed.size();
         round_up(self.align(), n)
     }
 }
@@ -197,8 +199,11 @@ impl Aligned for Vec<StructSlot> {
     }
 }
 
+#[allow(unused)]
 mod tests {
-    use super::*;
+    use crate::wgsl::{Aligned, PType, Sized, TType};
+    use PType::*;
+    use TType::*;
 
     fn catch_unwind_silent<F: FnOnce() -> R + std::panic::UnwindSafe, R>(
         f: F,
@@ -213,14 +218,14 @@ mod tests {
     #[test]
     fn correctly_sized_ptype() {
         let ptype_and_size = vec![
-            (PType::Bool, 1),
-            (PType::I32, 4),
-            (PType::I64, 8),
-            (PType::U32, 4),
-            (PType::U64, 8),
-            (PType::F16, 2),
-            (PType::F32, 4),
-            (PType::F64, 8),
+            (Bool, 1),
+            (I32, 4),
+            (I64, 8),
+            (U32, 4),
+            (U64, 8),
+            (F16, 2),
+            (F32, 4),
+            (F64, 8),
         ];
 
         for (ptype, size) in ptype_and_size {
@@ -230,12 +235,7 @@ mod tests {
 
     #[test]
     fn align_with_valid_ptype() {
-        let ptype_and_align = vec![
-            (PType::F16, 2),
-            (PType::I32, 4),
-            (PType::U32, 4),
-            (PType::F32, 4),
-        ];
+        let ptype_and_align = vec![(F16, 2), (I32, 4), (U32, 4), (F32, 4)];
 
         for (ptype, align) in ptype_and_align {
             assert!(ptype.align() == align);
@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn align_with_invalid_ptype() {
-        let ptypes = vec![PType::Bool, PType::I64, PType::U64, PType::F64];
+        let ptypes = vec![Bool, I64, U64, F64];
 
         for ptype in ptypes {
             let result = catch_unwind_silent(|| ptype.align());
@@ -254,12 +254,7 @@ mod tests {
 
     #[test]
     fn align_with_valid_scalar_ttype() {
-        let ptype_and_align = vec![
-            (PType::F16, 2),
-            (PType::I32, 4),
-            (PType::U32, 4),
-            (PType::F32, 4),
-        ];
+        let ptype_and_align = vec![(F16, 2), (I32, 4), (U32, 4), (F32, 4)];
 
         for (ptype, align) in ptype_and_align {
             assert!(TType::Scalar(ptype).align() == align);
@@ -271,7 +266,7 @@ mod tests {
         let vec_size_and_align = vec![(2, 4), (3, 8), (4, 8)];
 
         for (vec_size, align) in vec_size_and_align {
-            assert!(TType::Vector(vec_size, PType::F16).align() == align);
+            assert!(Vector(vec_size, F16).align() == align);
         }
     }
 
@@ -280,15 +275,15 @@ mod tests {
         let vec_size_and_align = vec![(2, 8), (3, 16), (4, 16)];
 
         for (vec_size, align) in vec_size_and_align.iter() {
-            assert!(TType::Vector(*vec_size, PType::F32).align() == *align);
+            assert!(Vector(*vec_size, F32).align() == *align);
         }
 
         for (vec_size, align) in vec_size_and_align.iter() {
-            assert!(TType::Vector(*vec_size, PType::I32).align() == *align);
+            assert!(Vector(*vec_size, I32).align() == *align);
         }
 
         for (vec_size, align) in vec_size_and_align.iter() {
-            assert!(TType::Vector(*vec_size, PType::U32).align() == *align);
+            assert!(Vector(*vec_size, U32).align() == *align);
         }
     }
 
@@ -299,10 +294,10 @@ mod tests {
         for (matrix_size, align) in matrix_size_and_align {
             for m in [2, 3, 4] {
                 assert!(
-                    TType::Matrix {
+                    Matrix {
                         m,
                         n: matrix_size,
-                        typed: PType::F16
+                        typed: F16
                     }
                     .align()
                         == align
@@ -318,10 +313,10 @@ mod tests {
         for (matrix_size, align) in matrix_size_and_align.iter() {
             for m in [2, 3, 4] {
                 assert!(
-                    TType::Matrix {
+                    Matrix {
                         m,
                         n: *matrix_size,
-                        typed: PType::F32
+                        typed: F32
                     }
                     .align()
                         == *align
@@ -332,10 +327,10 @@ mod tests {
         for (matrix_size, align) in matrix_size_and_align.iter() {
             for m in [2, 3, 4] {
                 assert!(
-                    TType::Matrix {
+                    Matrix {
                         m,
                         n: *matrix_size,
-                        typed: PType::I32
+                        typed: I32
                     }
                     .align()
                         == *align
@@ -346,10 +341,10 @@ mod tests {
         for (matrix_size, align) in matrix_size_and_align.iter() {
             for m in [2, 3, 4] {
                 assert!(
-                    TType::Matrix {
+                    Matrix {
                         m,
                         n: *matrix_size,
-                        typed: PType::U32
+                        typed: U32
                     }
                     .align()
                         == *align

@@ -1,6 +1,6 @@
 use image::GenericImageView;
 
-use crate::parser::ShaderOptions;
+use super::parser::ShaderOptions;
 
 pub struct Texture {
     pub texture: wgpu::Texture,
