@@ -88,7 +88,7 @@ impl Sized for TType {
         use TType::*;
         match self {
             Scalar(x) => x.size(),
-            Vector(nb, x) => *nb as usize * x.size(),
+            Vector(nb, x) => *nb * x.size(),
             Matrix { m, n, typed: x } => m * n * x.size(),
             Array(n, x) => n * x.size(),
         }
@@ -100,7 +100,7 @@ impl Aligned for TType {
         use TType::*;
         match self {
             Scalar(x) => x.align(),
-            Vector(nb, x) => (*nb as usize * x.align()).next_power_of_two(),
+            Vector(nb, x) => (*nb * x.align()).next_power_of_two(),
             Matrix { n, typed: x, .. } => Vector(*n, *x).align(),
             Array(_n, x) => x.align(),
         }

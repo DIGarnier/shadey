@@ -2,12 +2,12 @@
 // - graph widget x-y
 
 struct GuiControlled {
-    timespan: f32; // range(min=1,max=50)
-    scale: u32; // range(min=1,max=20)
-    circle_scale: f32; // range(min=0.01,max=1.0)
-    x: f32;
-    y: f32;
-    color: vec3<f32>;
+    timespan: f32, // range(min=1,max=50)
+    scale: u32, // range(min=1,max=20)
+    circle_scale: f32, // range(min=0.01,max=1.0)
+    x: f32,
+    y: f32,
+    color: vec3<f32>,
 };
 
 
@@ -50,8 +50,8 @@ fn grad(x: f32) -> f32
 }
 
 // Fragment shader
-[[stage(fragment)]]
-fn fs_main(vo: VertexOutput) -> [[location(0)]] vec4<f32> {
+@fragment
+fn fs_main(vo: VertexOutput) -> @location(0) vec4<f32> {
     let t = time()*timespan();
 
     var spos = screen_coords(vo, vec2<f32>(0.5));
@@ -61,7 +61,7 @@ fn fs_main(vo: VertexOutput) -> [[location(0)]] vec4<f32> {
     let eps = circle_scale();
     let wow = abs(f(spos.x) - spos.y)/sqrt(1.0+grad(spos.x)*grad(spos.x));
     
-    var col = vec3<f32>(smoothStep(1.0*eps, 2.0*eps, wow ));
+    var col = vec3<f32>(smoothstep(1.0*eps, 2.0*eps, wow ));
 
     return vec4<f32>(col,1.);
 }

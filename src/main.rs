@@ -19,10 +19,10 @@ mod ui;
 mod wgsl;
 
 use app::App;
-use winit::{event::Event, event_loop::ControlFlow};
+use winit::{event::Event, event_loop::{ControlFlow, EventLoopBuilder}};
 
 fn main() {
-    let event_loop = winit::event_loop::EventLoop::with_user_event();
+    let event_loop = EventLoopBuilder::with_user_event().build();
     let mut app = pollster::block_on(App::new(&event_loop));
 
     let event_loop_proxy = event_loop.create_proxy();

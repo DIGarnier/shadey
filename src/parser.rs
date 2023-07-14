@@ -108,7 +108,7 @@ fn array(input: &str) -> IResult<&str, TType> {
 
 fn typer(input: &str) -> IResult<&str, TType> {
     let (rest, type_value) = alt((scalar, vector, matrix, array))(input)?;
-    let (rest, _) = alt((tag(";"), tag("")))(rest)?;
+    let (rest, _) = alt((tag(","), tag("")))(rest)?;
 
     Ok((rest, type_value))
 }

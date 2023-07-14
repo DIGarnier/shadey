@@ -1,10 +1,10 @@
 struct GuiControlled {
-    speed: f32; // range(min=0,max=10)
-    expo: f32; // wow
-    colorf32: vec3<f32>; // b
-    coloru32: vec3<u32>; // b
-    circle_r: f32; // v
-    test: u32;
+    speed: f32, // range(min=0,max=10)
+    expo: f32, // wow
+    colorf32: vec3<f32>, // b
+    coloru32: vec3<u32>, // b
+    circle_r: f32, // v
+    test: u32,
 };
 
 // Shadey
@@ -29,8 +29,8 @@ fn box(p: vec2<f32>, b: vec2<f32> ) -> f32
 }
 
 // Fragment shader
-[[stage(fragment)]]
-fn fs_main(vo: VertexOutput) -> [[location(0)]] vec4<f32> {
+@fragment
+fn fs_main(vo: VertexOutput) -> @location(0) vec4<f32> {
     let mouse_pos = toggle_mouse_pos();
     let t = time() * speed();
     var shape_pos = vec2<f32>(sin(t/1.57), cos(t))/2.5 + 0.5;
@@ -42,7 +42,7 @@ fn fs_main(vo: VertexOutput) -> [[location(0)]] vec4<f32> {
     var col = vec3<f32>(1.0) - sign(d)*vec3<f32>(shape_pos,0.7);
     let pos = screen_coords(vo, vec2<f32>(0.0));
     let tex_ratio = vec2<f32>(window_size())/texture_sm_size();
-    col = mix(col, texture_sm(pos/tex_ratio).xyz, 1.0-smoothStep(0.0,expo(),abs(d)));
+    col = mix(col, texture_sm(pos/tex_ratio).xyz, 1.0-smoothstep(0.0,expo(),abs(d)));
 
     // return texture_sm(pos+vec2<f32>(sin(pos.y*2.0-t), sin(pos.x*4.0+t))*0.5); 
     return vec4<f32>(col, 1.0); 

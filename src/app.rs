@@ -3,8 +3,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures::{executor::ThreadPool, Future};
-use notify::{DebouncedEvent, ReadDirectoryChangesWatcher, RecursiveMode, Watcher};
+use futures::executor::ThreadPool;
+use notify_debouncer_full::{
+    new_debouncer,
+    notify::{self, ReadDirectoryChangesWatcher, RecursiveMode, Watcher},
+    DebouncedEvent, Debouncer,
+};
 use wgpu::BindGroupLayout;
 
 use winit::{
@@ -33,7 +37,7 @@ pub struct App {
     textures: Vec<Texture>,
     start_instant: Instant,
     ui: Egui,
-    file_watcher: ReadDirectoryChangesWatcher,
+    file_watcher: Debouncer<ReadDirectoryChangesWatcher, notify_debouncer_full::FileIdMap>,
     old_shader_path: PathBuf,
 }
 
@@ -45,8 +49,8 @@ impl App {
             .with_maximized(true)
             .build(event_loop)
             .expect("Window to be created without problem");
-        let instance = wgpu::Instance::new(wgpu::Backends::VULKAN);
-        let surface = unsafe { instance.create_surface(&window) };
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
+        let surface = unsafe { instance.create_surface(&window).unwrap() };
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -70,11 +74,13 @@ impl App {
 
         let size = window.inner_size();
         let config = wgpu::SurfaceConfiguration {
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: wgpu::TextureFormat::Bgra8UnormSrgb,
             width: size.width,
             height: size.height,
-            present_mode: wgpu::PresentMode::Mailbox,
+            present_mode: wgpu::PresentMode::Immediate,
+            view_formats: vec![wgpu::TextureFormat::Bgra8UnormSrgb],
         };
         surface.configure(&device, &config);
 
@@ -133,8 +139,7 @@ impl App {
 
         let thread_pool =
             futures::executor::ThreadPool::new().expect("ThreadPool to be created without problem");
-        let (fw_future, file_watcher) = create_file_watcher(&default_shader_path, event_loop);
-        thread_pool.spawn_ok(fw_future);
+        let file_watcher = create_file_watcher(&default_shader_path, event_loop);
 
         window.set_visible(true);
         Self {
@@ -236,7 +241,8 @@ impl App {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: true,
                     },
-                }],
+                }
+                .into()],
                 depth_stencil_attachment: None,
             });
 
@@ -365,9 +371,11 @@ impl App {
 
                 if new_shader_path != self.old_shader_path {
                     self.file_watcher
+                        .watcher()
                         .unwatch(&self.old_shader_path)
                         .expect("Old shader path should be exist (was already used)");
                     self.file_watcher
+                        .watcher()
                         .watch(&new_shader_path, RecursiveMode::NonRecursive)
                         .expect("Shader path should exist (was already validated)");
 
@@ -427,15 +435,16 @@ fn create_shader_module(
     unsafe {
         VALID = true;
     }
-    device.on_uncaptured_error(|e| {
+    device.on_uncaptured_error(Box::new(|e| {
         if let wgpu::Error::Validation { description, .. } = e {
             unsafe {
                 VALID = false;
                 ERROR = description;
             }
         }
-    });
-    let shader_module = device.create_shader_module(&wgpu::ShaderModuleDescriptor {
+    }));
+
+    let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
         source: wgpu::ShaderSource::Wgsl(shader_content.as_ref().into()),
     });
@@ -477,7 +486,8 @@ fn create_render_pipeline(
                     alpha: wgpu::BlendComponent::REPLACE,
                 }),
                 write_mask: wgpu::ColorWrites::ALL,
-            }],
+            }
+            .into()],
         }),
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleStrip,
@@ -615,28 +625,39 @@ fn create_texture_bind_groups_layouts(
 fn create_file_watcher(
     shader_path: &Path,
     event_loop: &EventLoop<ShadeyEvent>,
-) -> (impl Future<Output = ()>, ReadDirectoryChangesWatcher) {
+) -> Debouncer<ReadDirectoryChangesWatcher, notify_debouncer_full::FileIdMap> {
     let watcher_event_loop_proxy = event_loop.create_proxy();
-    let (send, recv) = std::sync::mpsc::channel();
-    let mut watcher = notify::watcher(send, Duration::from_millis(100u64)).unwrap();
+    let mut debouncer = new_debouncer(
+        Duration::from_millis(100u64),
+        None,
+        move |res: Result<Vec<DebouncedEvent>, Vec<notify_debouncer_full::notify::Error>>| match res
+        {
+            Ok(events) => {
+                let Some(debounced_event) = events.last() else {
+                    return;
+                };
 
-    watcher
+                use notify::*;
+                if let Event {
+                    kind: EventKind::Modify(_),
+                    paths,
+                    ..
+                } = &debounced_event.event
+                {
+                    watcher_event_loop_proxy
+                        .send_event(ShadeyEvent::ReloadShader(paths.last().unwrap().clone()))
+                        .unwrap()
+                }
+            }
+            Err(e) => println!("watch error: {:?}", e),
+        },
+    )
+    .unwrap();
+
+    debouncer
+        .watcher()
         .watch(shader_path, RecursiveMode::NonRecursive)
         .unwrap();
 
-    (
-        async move {
-            loop {
-                match recv.recv() {
-                    Ok(DebouncedEvent::Write(p)) => watcher_event_loop_proxy
-                        .send_event(ShadeyEvent::ReloadShader(p))
-                        .unwrap(),
-                    Ok(DebouncedEvent::Remove(_)) | Ok(DebouncedEvent::Create(_)) => return,
-                    Err(e) => println!("watch error: {:?}", e),
-                    _ => {}
-                }
-            }
-        },
-        watcher,
-    )
+    debouncer
 }

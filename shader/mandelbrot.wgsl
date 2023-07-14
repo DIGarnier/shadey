@@ -2,10 +2,10 @@
 // - graph widget x-y
 // load textures?
 struct GuiControlled {
-    timespan: u32;
-    scale: f32;
-    x: f32;
-    y: f32;
+    timespan: u32,
+    scale: f32,
+    x: f32,
+    y: f32,
 };
 
 // Generate 2 somewhat random numbers
@@ -43,8 +43,8 @@ fn smoothstep(x: f32) -> f32 {
 
 
 // Fragment shader
-[[stage(fragment)]]
-fn fs_main(vo: VertexOutput) -> [[location(0)]] vec4<f32> {
+@fragment
+fn fs_main(vo: VertexOutput) -> @location(0) vec4<f32> {
     var mouse_pos = toggle_mouse_pos();
     let total_t = 100.0;
     let t = fract(time()/total_t) * 2.0;

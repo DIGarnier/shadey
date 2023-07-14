@@ -1,5 +1,6 @@
 use std::{path::PathBuf, time::Instant};
 
+use egui::FullOutput;
 use egui_wgpu_backend::ScreenDescriptor;
 use egui_winit_platform::{Platform, PlatformDescriptor};
 use wgpu::{CommandEncoder, TextureView};
@@ -90,7 +91,7 @@ fn ui_vec4u32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
     gui_struct.write_to_slot::<[u32; 4]>(slot, &data.map(|x| (x * 255.0) as _));
 }
 
-pub fn generate_auto_ui(ctx: &egui::CtxRef, gui_struct: &mut RuntimeStruct) {
+pub fn generate_auto_ui(ctx: &egui::Context, gui_struct: &mut RuntimeStruct) {
     egui::SidePanel::right("autogen_ui").show(ctx, |ui| {
         use egui::*;
         trace!(ui);
@@ -120,6 +121,8 @@ pub enum ShadeyEvent {
     OpenFileDialog,
     ReloadShader(PathBuf),
 }
+
+unsafe impl Sync for ShadeyEvent {}
 
 pub struct Egui {
     pub platform: egui_winit_platform::Platform,
@@ -174,8 +177,8 @@ impl Egui {
         self.platform.begin_frame();
         let egui_ctx = &self.platform.context();
         self.update(egui_ctx);
-        let (_output, paint_commands) = self.platform.end_frame(Some(window));
-        let paint_jobs = egui_ctx.tessellate(paint_commands);
+        let FullOutput {shapes, ref textures_delta, ..} = self.platform.end_frame(Some(window));
+        let paint_jobs = egui_ctx.tessellate(shapes);
         self.previous_frame_time = (Instant::now() - start).as_secs_f32().into();
 
         let screen_descriptor = ScreenDescriptor {
@@ -183,9 +186,7 @@ impl Egui {
             physical_height: config.height,
             scale_factor: window.scale_factor() as _,
         };
-        self.render_pass
-            .update_texture(device, queue, &egui_ctx.texture());
-        self.render_pass.update_user_textures(device, queue);
+        self.render_pass.add_textures(device, queue, textures_delta);
         self.render_pass
             .update_buffers(device, queue, &paint_jobs, &screen_descriptor);
         self.render_pass
@@ -193,12 +194,12 @@ impl Egui {
             .unwrap();
     }
 
-    fn update(&mut self, ctx: &egui::CtxRef) {
+    fn update(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             use egui::*;
 
             menu::bar(ui, |ui| {
-                menu::menu(ui, "Shader", |ui| {
+                menu::menu_button(ui, "Shader", |ui| {
                     if ui.button("Open...").clicked() {
                         self.event_loop_proxy
                             .send_event(ShadeyEvent::OpenFileDialog)

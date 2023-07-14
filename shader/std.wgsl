@@ -1,21 +1,21 @@
 struct StdUniform {
-    window_size: vec2<u32>;
-    mouse_pos: vec2<u32>;
-    time: f32;
-    toggle_mouse_pos: vec2<u32>;
+    window_size: vec2<u32>,
+    mouse_pos: vec2<u32>,
+    time: f32,
+    toggle_mouse_pos: vec2<u32>,
 };
 
-[[group(0), binding(0)]]
+@group(0) @binding(0)
 var<uniform> _std_uniform: StdUniform;
 
 struct VertexOutput {
-    [[builtin(position)]] clip_position: vec4<f32>;
-    [[location(0)]] texcoords: vec2<f32>;
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) texcoords: vec2<f32>,
 };
 
-[[stage(vertex)]]
+@vertex
 fn vs_main(
-    [[builtin(vertex_index)]] in_vertex_index: u32,
+    @builtin(vertex_index) in_vertex_index: u32,
 ) -> VertexOutput {
     var vertices = array<vec2<f32>,3>(vec2<f32>(-1.,-1.), vec2<f32>(3.,-1.), vec2<f32>(-1., 3.));
     var out: VertexOutput;

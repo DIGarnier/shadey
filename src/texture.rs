@@ -12,9 +12,9 @@ pub struct Texture {
 impl Texture {
     pub fn generate_definition(&self, group_id: usize) -> String {
         format!(
-            "[[group({group_id}), binding(0)]] \n\
+            "@group({group_id}) @binding(0) \n\
             var t_diffuse{group_id}: texture_2d<f32>; \n\
-            [[group({group_id}), binding(1)]] \n\
+            @group({group_id}) @binding(1) \n\
             var s_diffuse{group_id}: sampler; \n\
             fn texture_{name}_size() -> vec2<f32> {{ return vec2<f32>(textureDimensions(t_diffuse{group_id}));}} \n\
             fn texture_{name}(vx: vec2<f32>) -> vec4<f32> \n\
@@ -85,6 +85,7 @@ impl Texture {
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Rgba8UnormSrgb,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[wgpu::TextureFormat::Rgba8UnormSrgb]
             });
             queue.write_texture(
                 wgpu::ImageCopyTexture {
@@ -96,8 +97,8 @@ impl Texture {
                 &rgba,
                 wgpu::ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: std::num::NonZeroU32::new(4 * dimensions.0),
-                    rows_per_image: std::num::NonZeroU32::new(dimensions.1),
+                    bytes_per_row: Some(4 * dimensions.0),
+                    rows_per_image: Some(dimensions.1),
                 },
                 size,
             );

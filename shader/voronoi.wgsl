@@ -1,14 +1,14 @@
 // pain points
 
 struct GuiControlled {
-    color_mode: u32;
-    number: u32; 
-    enhance_factor: f32;
-    speed: f32;
-    object_color: vec3<f32>;
-    point_color: vec3<f32>;
-    influence: f32;
-    distance_percent: f32;  
+    color_mode: u32,
+    number: u32, 
+    enhance_factor: f32,
+    speed: f32,
+    object_color: vec3<f32>,
+    point_color: vec3<f32>,
+    influence: f32,
+    distance_percent: f32,  
 };
 
 
@@ -41,8 +41,8 @@ fn minkowski_distance(a: vec2<f32>, b: vec2<f32>, p: f32) -> f32 {
 
 
 // Fragment shader
-[[stage(fragment)]]
-fn fs_main(vo: VertexOutput) -> [[location(0)]] vec4<f32> {
+@fragment
+fn fs_main(vo: VertexOutput) -> @location(0) vec4<f32> {
     var pos = screen_coords(vo, vec2<f32>(0.0));
     var color = vec3<f32>(0.0);
     var min_dist = 10.0;

@@ -2,12 +2,12 @@
 // - graph widget x-y
 
 struct GuiControlled {
-    timespan: f32; // range(min=1,max=50)
-    scale: u32; // range(min=1,max=20)
-    circle_scale: f32; // range(min=0.01,max=1.0)
-    x: f32;
-    y: f32;
-    color: vec3<f32>;
+    timespan: f32, // range(min=1,max=50)
+    scale: u32, // range(min=1,max=20)
+    circle_scale: f32, // range(min=0.01,max=1.0)
+    x: f32,
+    y: f32,
+    color: vec3<f32>,
 };
 
 
@@ -39,9 +39,8 @@ fn rot2d(pos: vec2<f32>, o: f32) -> vec2<f32> {
 }
 
 
-// Fragment shader
-[[stage(fragment)]]
-fn fs_main(vo: VertexOutput) -> [[location(0)]] vec4<f32> {
+@fragment
+fn fs_main(vo: VertexOutput) -> @location(0) vec4<f32> {
     let t = time()*timespan();
 
     var spos = screen_coords(vo, vec2<f32>(0.5));
@@ -52,7 +51,7 @@ fn fs_main(vo: VertexOutput) -> [[location(0)]] vec4<f32> {
     var cir = circle(spos, circle_scale());
     var v = vec3<f32>(abs(swirl(spos)*cir));
     let eps = 0.03;
-    var col = smoothStep(color(), vec3<f32>(0.0), v);
+    var col = smoothstep(color(), vec3<f32>(0.0), v);
 
     return vec4<f32>(col,1.);
 }

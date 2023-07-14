@@ -1,10 +1,10 @@
 struct GuiControlled {
-    x: f32; // range(min=-2,max=2)
-    y: f32; // range(min=-2,max=2)
-    z: f32; // range(min=-2,max=2)
-    noise: f32; // range(min=1,max=10)
-    rep: u32; // range(min=0,max=100)
-    color: vec3<f32>;
+    x: f32, // range(min=-2,max=2)
+    y: f32, // range(min=-2,max=2)
+    z: f32, // range(min=-2,max=2)
+    noise: f32, // range(min=1,max=10)
+    rep: u32, // range(min=0,max=100)
+    color: vec3<f32>,
 };
 
 
@@ -289,7 +289,7 @@ fn render(ro: vec3<f32>, rd: vec3<f32>, rdx: vec3<f32>, rdy: vec3<f32>) -> vec3<
         {
             var dif = sqrt(clamp(0.5+0.5*nor.y, 0.0, 1.0));
                 dif = dif * occ;
-            var spe = smoothStep(-0.2, 0.2, ref.y);
+            var spe = smoothstep(-0.2, 0.2, ref.y);
                 spe = spe * dif;
                 spe = spe * 0.04+0.96*pow(clamp(1.0+dot(nor,rd),0.0,1.0), 5.0);
                 spe = spe * calcSoftshadow(pos, ref, 0.02, 2.5);
@@ -307,8 +307,8 @@ fn render(ro: vec3<f32>, rd: vec3<f32>, rdx: vec3<f32>, rdy: vec3<f32>) -> vec3<
 
 
 // Fragment shader
-[[stage(fragment)]]
-fn fs_main(in: VertexOutput) -> [[location(0)]] vec4<f32> {
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let base_coord = vec2<f32>(0.5, 0.5);
 
     var p = screen_coords(in, base_coord);
