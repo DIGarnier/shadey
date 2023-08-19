@@ -37,7 +37,7 @@ fn identifier(input: &str) -> IResult<&str, &str> {
 }
 
 fn pscalar(name: &str, typed: PType) -> impl FnMut(&str) -> IResult<&str, PType> {
-    let name = name.to_owned();
+    let name: String = name.to_owned();
     move |input: &str| tag(&name[..])(input).map(|(rest, _)| (rest, typed))
 }
 
@@ -178,10 +178,6 @@ pub enum ShaderOptions {
 }
 
 impl ShaderOptions {
-    pub fn is_texture_opt(&self) -> bool {
-        matches!(self, ShaderOptions::Texture { .. })
-    }
-
     pub fn texture(path: &Path, name: &String) -> ShaderOptions {
         ShaderOptions::Texture {
             path: path.into(),
@@ -229,7 +225,7 @@ pub fn arguments(input: &str) -> IResult<&str, Arguments> {
 }
 
 fn address_mode(input: &str) -> Option<wgpu::AddressMode> {
-    match &input.to_lowercase()[..] {
+    match input.to_lowercase().as_str() {
         "clamptoedge" => wgpu::AddressMode::ClampToEdge.into(),
         "clamptoborder" => wgpu::AddressMode::ClampToBorder.into(),
         "repeat" => wgpu::AddressMode::Repeat.into(),

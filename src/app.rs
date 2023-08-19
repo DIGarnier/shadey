@@ -1,5 +1,5 @@
 use std::{
-    path::{Path, PathBuf},
+    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -18,7 +18,7 @@ use winit::{
 };
 
 use super::{
-    shader::{ShaderFileBuf, ShaderFileBuilder, Uniform, UniformChoice, GUICONTROLLED_DEF},
+    shader::{ShaderFileBuf, ShaderFileBuilder, Uniform, UniformKind, GUICONTROLLED_DEF},
     texture::Texture,
     ui::{Egui, ShadeyEvent},
     wgsl::Sized,
@@ -90,11 +90,11 @@ impl App {
             let mut default_shader_builder = ShaderFileBuilder::new(&default_shader_path)
                 .expect("Default shader should be present");
 
-            let std_uniform = default_shader_builder.uniform(&device, UniformChoice::StandardLib);
-            let gui_uniform = default_shader_builder.uniform(&device, UniformChoice::GuiControlled);
+            let std_uniform = default_shader_builder.uniform(&device, UniformKind::StandardLib);
+            let gui_uniform = default_shader_builder.uniform(&device, UniformKind::GuiControlled);
 
             default_shader_builder.inject_content(GUICONTROLLED_DEF);
-            for slot in &gui_uniform.dynamic_struct.slots {
+            for slot in &gui_uniform.runtime_struct.slots {
                 default_shader_builder.inject_content(&slot.generate_definition());
             }
             let textures = default_shader_builder.textures(&device, &queue);
@@ -139,7 +139,15 @@ impl App {
 
         let thread_pool =
             futures::executor::ThreadPool::new().expect("ThreadPool to be created without problem");
-        let file_watcher = create_file_watcher(&default_shader_path, event_loop);
+        let file_watcher = {
+            let mut debouncer = create_file_watcher(event_loop);
+            debouncer
+                .watcher()
+                .watch(&default_shader_path, RecursiveMode::NonRecursive)
+                .unwrap();
+
+            debouncer
+        };
 
         window.set_visible(true);
         Self {
@@ -166,7 +174,7 @@ impl App {
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
             self.std_uniform
-                .dynamic_struct
+                .runtime_struct
                 .write_to_slot::<[u32; 2]>(1, &new_size.into()); // slot 1 is window_size
         }
     }
@@ -175,7 +183,7 @@ impl App {
         match event {
             WindowEvent::CursorMoved { position, .. } => {
                 self.std_uniform
-                    .dynamic_struct
+                    .runtime_struct
                     .write_to_slot::<[u32; 2]>(2, &(*position).into()); // slot 2 is mouse_pos
                 true
             }
@@ -186,10 +194,10 @@ impl App {
             } => {
                 let mouse_pos = self
                     .std_uniform
-                    .dynamic_struct
+                    .runtime_struct
                     .read_from_slot_ref_mut::<[u32; 2]>(2) // slot 2 is mouse_pos
                     .to_owned();
-                self.std_uniform.dynamic_struct.write_to_slot(4, &mouse_pos); // slot 4 is toggle_mouse_pos
+                self.std_uniform.runtime_struct.write_to_slot(4, &mouse_pos); // slot 4 is toggle_mouse_pos
                 true
             }
             _ => false,
@@ -200,7 +208,7 @@ impl App {
         let time_elapsed = self.start_instant.elapsed().as_secs_f64();
         self.ui.platform.update_time(time_elapsed);
 
-        self.std_uniform.dynamic_struct.write_to_slot(
+        self.std_uniform.runtime_struct.write_to_slot(
             3, // slot 3 is time
             &(time_elapsed as f32),
         );
@@ -208,13 +216,13 @@ impl App {
         self.queue.write_buffer(
             &self.std_uniform.gpu_buffer_handle,
             0,
-            self.std_uniform.dynamic_struct.buffer(),
+            self.std_uniform.runtime_struct.buffer(),
         );
 
         self.queue.write_buffer(
             &self.ui.gui_uniform.gpu_buffer_handle,
             0,
-            self.ui.gui_uniform.dynamic_struct.buffer(),
+            self.ui.gui_uniform.runtime_struct.buffer(),
         );
     }
 
@@ -284,29 +292,24 @@ impl App {
 
                 let event_loop_proxy_clone = event_loop_proxy.clone();
                 self.thread_pool.spawn_ok(async move {
-                    let new_shader_file = dialog.await;
-                    let new_shader_path = new_shader_file.unwrap().path().to_owned();
-
+                    let new_shader_file = dialog.await.unwrap();
                     event_loop_proxy_clone
-                        .send_event(ShadeyEvent::ReloadShader(new_shader_path))
+                        .send_event(ShadeyEvent::ReloadShader(new_shader_file.path().to_owned()))
                         .expect("Event loop should send event...");
                 });
             }
             ShadeyEvent::ReloadShader(new_shader_path) => {
                 let (shader_content, candidate_uniform, textures) = {
-                    let maybe_shader_builder = ShaderFileBuilder::new(&new_shader_path);
-
-                    if maybe_shader_builder.is_none() {
+                    let Some(mut shader_builder) = ShaderFileBuilder::new(&new_shader_path) else {
                         eprintln!("Shader wasn't found");
                         return;
-                    }
-                    let mut shader_builder = maybe_shader_builder.unwrap();
+                    };
 
                     let candidate_uniform =
-                        shader_builder.uniform(&self.device, UniformChoice::GuiControlled);
+                        shader_builder.uniform(&self.device, UniformKind::GuiControlled);
 
                     shader_builder.inject_content(GUICONTROLLED_DEF);
-                    for slot in &candidate_uniform.dynamic_struct.slots {
+                    for slot in &candidate_uniform.runtime_struct.slots {
                         shader_builder.inject_content(&slot.generate_definition());
                     }
 
@@ -329,7 +332,7 @@ impl App {
                 let maybe_shader_module = create_shader_module(&self.device, &shader_content);
 
                 if let Err(e) = maybe_shader_module {
-                    eprintln!("{}", e);
+                    eprintln!("{e}");
                     return;
                 }
 
@@ -337,8 +340,8 @@ impl App {
 
                 self.textures = textures;
 
-                if candidate_uniform.dynamic_struct.slots
-                    != self.ui.gui_uniform.dynamic_struct.slots
+                if candidate_uniform.runtime_struct.slots
+                    != self.ui.gui_uniform.runtime_struct.slots
                 {
                     self.ui.gui_uniform = candidate_uniform;
                 }
@@ -408,9 +411,7 @@ impl App {
                     ..
                 } => *control_flow = ControlFlow::Exit,
                 WindowEvent::Resized(physical_size) => self.resize(*physical_size),
-                WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
-                    self.resize(**new_inner_size)
-                }
+                WindowEvent::ScaleFactorChanged { new_inner_size, .. } => self.resize(**new_inner_size),
                 _ => {}
             }
         }
@@ -522,7 +523,7 @@ fn create_main_bind_group_layout(
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
                     min_binding_size: wgpu::BufferSize::new(
-                        std_uniform.dynamic_struct.slots.size() as _,
+                        std_uniform.runtime_struct.slots.size() as _,
                     ),
                 },
                 count: None,
@@ -534,7 +535,7 @@ fn create_main_bind_group_layout(
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
                     min_binding_size: wgpu::BufferSize::new(
-                        gui_uniform.dynamic_struct.slots.size() as _,
+                        gui_uniform.runtime_struct.slots.size() as _,
                     ),
                 },
                 count: None,
@@ -623,15 +624,13 @@ fn create_texture_bind_groups_layouts(
 }
 
 fn create_file_watcher(
-    shader_path: &Path,
     event_loop: &EventLoop<ShadeyEvent>,
 ) -> Debouncer<ReadDirectoryChangesWatcher, notify_debouncer_full::FileIdMap> {
     let watcher_event_loop_proxy = event_loop.create_proxy();
-    let mut debouncer = new_debouncer(
+    new_debouncer(
         Duration::from_millis(100u64),
         None,
-        move |res: Result<Vec<DebouncedEvent>, Vec<notify_debouncer_full::notify::Error>>| match res
-        {
+        move |res: Result<Vec<DebouncedEvent>, _>| match res {
             Ok(events) => {
                 let Some(debounced_event) = events.last() else {
                     return;
@@ -652,12 +651,5 @@ fn create_file_watcher(
             Err(e) => println!("watch error: {:?}", e),
         },
     )
-    .unwrap();
-
-    debouncer
-        .watcher()
-        .watch(shader_path, RecursiveMode::NonRecursive)
-        .unwrap();
-
-    debouncer
+    .unwrap()
 }

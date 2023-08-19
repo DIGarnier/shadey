@@ -251,7 +251,7 @@ fn render(ro: vec3<f32>, rd: vec3<f32>, rdx: vec3<f32>, rdy: vec3<f32>) -> vec3<
     {
         var pos = ro + t*rd;
         var nor = select(calcNormal(pos), vec3<f32>(0.0,1.0,0.0), m < 1.5);
-        var ref = reflect(rd, nor);
+        var reff = reflect(rd, nor);
         
         // material        
         col = 0.2 + 0.2*sin(m*2.0 + vec3<f32>(0.0,1.0,2.0));
@@ -289,10 +289,10 @@ fn render(ro: vec3<f32>, rd: vec3<f32>, rdx: vec3<f32>, rdy: vec3<f32>) -> vec3<
         {
             var dif = sqrt(clamp(0.5+0.5*nor.y, 0.0, 1.0));
                 dif = dif * occ;
-            var spe = smoothstep(-0.2, 0.2, ref.y);
+            var spe = smoothstep(-0.2, 0.2, reff.y);
                 spe = spe * dif;
                 spe = spe * 0.04+0.96*pow(clamp(1.0+dot(nor,rd),0.0,1.0), 5.0);
-                spe = spe * calcSoftshadow(pos, ref, 0.02, 2.5);
+                spe = spe * calcSoftshadow(pos, reff, 0.02, 2.5);
             lin = lin + col*0.60*dif*vec3<f32>(0.40,0.60,1.15);
             lin = lin +     2.00*spe*vec3<f32>(0.40,0.60,1.30)*ks;
         }

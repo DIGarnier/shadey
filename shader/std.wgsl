@@ -36,14 +36,12 @@ fn window_size() -> vec2<u32> {
 
 fn mouse_pos() -> vec2<f32> {
     var mouse_pos = vec2<f32>(_std_uniform.mouse_pos.xy)/vec2<f32>(_std_uniform.window_size.xy);
-    mouse_pos.y = 1. - mouse_pos.y;
-    return mouse_pos;
+    return flipy(mouse_pos);
 }
 
 fn toggle_mouse_pos() -> vec2<f32> {
     var mouse_pos = vec2<f32>(_std_uniform.toggle_mouse_pos.xy)/vec2<f32>(_std_uniform.window_size.xy);
-    mouse_pos.y = 1. - mouse_pos.y;
-    return mouse_pos;
+    return flipy(mouse_pos);
 }
 
 fn time() -> f32 {
@@ -52,7 +50,7 @@ fn time() -> f32 {
 
 fn hex_to_rgba(a: u32) -> vec4<f32> {
     return vec4<f32>(vec4<u32>(
-        extractBits(a, 24u, 8u), 
+        extractBits(a, 24u, 8u),
         extractBits(a, 16u, 8u),
         extractBits(a, 8u, 8u), 
         extractBits(a, 0u, 8u))) / 255.0;

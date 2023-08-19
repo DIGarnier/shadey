@@ -15,7 +15,7 @@ use super::{
     wgsl::{RuntimeStruct, PType, StructSlotOptions, TType},
 };
 
-fn ui_f32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
+fn make_f32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
     let range = gui_struct.slots[slot - 1]
         .options
@@ -31,7 +31,7 @@ fn ui_f32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
     });
 }
 
-fn ui_u32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
+fn make_u32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
     let range = gui_struct.slots[slot - 1]
         .options
@@ -48,7 +48,7 @@ fn ui_u32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
     });
 }
 
-fn ui_vec3f32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
+fn make_vec3f32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
     let data = gui_struct.read_from_slot_ref_mut::<[f32; 3]>(slot);
     ui.horizontal(|ui| {
@@ -57,7 +57,7 @@ fn ui_vec3f32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
     });
 }
 
-fn ui_vec4f32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
+fn make_vec4f32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
     let data = gui_struct.read_from_slot_ref_mut::<[f32; 4]>(slot);
     ui.horizontal(|ui| {
@@ -66,7 +66,7 @@ fn ui_vec4f32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
     });
 }
 
-fn ui_vec3u32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
+fn make_vec3u32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
     let mut data = gui_struct
         .read_from_slot_ref_mut::<[u32; 3]>(slot)
@@ -79,7 +79,7 @@ fn ui_vec3u32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
     gui_struct.write_to_slot::<[u32; 3]>(slot, &data.map(|x| (x * 255.0) as _));
 }
 
-fn ui_vec4u32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
+fn make_vec4u32(ui: &mut egui::Ui, gui_struct: &mut RuntimeStruct, slot: usize) {
     let identifier = gui_struct.slots[slot - 1].identifier.clone();
     let mut data = gui_struct
         .read_from_slot_ref_mut::<[u32; 4]>(slot)
@@ -102,12 +102,12 @@ pub fn generate_auto_ui(ctx: &egui::Context, gui_struct: &mut RuntimeStruct) {
             use TType::*;
             use PType::*;
             match &gui_struct.slots[i].typed {
-                Scalar(F32) => ui_f32(ui, gui_struct, actual_slot),
-                Scalar(U32) => ui_u32(ui, gui_struct, actual_slot),
-                Vector(3, F32) => ui_vec3f32(ui, gui_struct, actual_slot),
-                Vector(4, F32) => ui_vec4f32(ui, gui_struct, actual_slot),
-                Vector(3, U32) => ui_vec3u32(ui, gui_struct, actual_slot),
-                Vector(4, U32) => ui_vec4u32(ui, gui_struct, actual_slot),
+                Scalar(F32) => make_f32(ui, gui_struct, actual_slot),
+                Scalar(U32) => make_u32(ui, gui_struct, actual_slot),
+                Vector(3, F32) => make_vec3f32(ui, gui_struct, actual_slot),
+                Vector(4, F32) => make_vec4f32(ui, gui_struct, actual_slot),
+                Vector(3, U32) => make_vec3u32(ui, gui_struct, actual_slot),
+                Vector(4, U32) => make_vec4u32(ui, gui_struct, actual_slot),
                 _ => {}
             }
 
@@ -186,7 +186,7 @@ impl Egui {
             physical_height: config.height,
             scale_factor: window.scale_factor() as _,
         };
-        self.render_pass.add_textures(device, queue, textures_delta);
+        self.render_pass.add_textures(device, queue, textures_delta).expect("add texture broke???");
         self.render_pass
             .update_buffers(device, queue, &paint_jobs, &screen_descriptor);
         self.render_pass
@@ -212,7 +212,7 @@ impl Egui {
             });
         });
         if self.draw_right_panel {
-            generate_auto_ui(ctx, &mut self.gui_uniform.dynamic_struct);
+            generate_auto_ui(ctx, &mut self.gui_uniform.runtime_struct);
         }
     }
 }
